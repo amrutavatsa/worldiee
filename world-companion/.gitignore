@@ -1,0 +1,66 @@
+# =========================
+# Flutter / Dart
+# =========================
+frontend/build/
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+
+frontend/android/.gradle/
+frontend/android/local.properties
+frontend/build_error_log.txt
+
+*.apk
+*.aab
+
+
+# =========================
+# Python / Django
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+
+backend/venv/
+backend/.venv/
+backend/db.sqlite3
+backend/db.sqlite3-journal
+
+backend/data/vosk-model/
+
+*.log
+
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
+
+
+# =========================
+# Python tooling
+# =========================
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/

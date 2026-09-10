@@ -1,0 +1,15 @@
+# World Companion — Backend Dependencies
+# Install with: pip install -r requirements.txt
+#
+# Versions are pinned to minimums known to work together for this project.
+# If a fresh install pulls a much newer major version and something breaks,
+# try pinning to the exact version shown here (e.g. django==6.1).
+
+django>=5.0            # Web framework + ORM (backend/config, backend/api)
+djangorestframework>=3.15   # REST response handling (backend/api/views.py)
+networkx>=3.2           # Graph structure + A* search (backend/core/routing.py)
+scikit-learn>=1.4        # Intent classifier: TF-IDF + Logistic Regression (backend/ml/intent_classifier.py)
+joblib>=1.3             # Saves/loads the trained intent model (data/intent_model.joblib)
+
+# Not required yet, but referenced in code for future setup — see DEPLOY.md Section 11:
+# vosk              # Offline speech-to-text (backend/ml/speech_to_text.py) — install once you set up voice input

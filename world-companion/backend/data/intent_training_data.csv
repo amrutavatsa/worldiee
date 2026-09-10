@@ -1,0 +1,41 @@
+text,intent
+take me from indiranagar to mg road,navigation
+plan a route to lalbagh and cubbon park,navigation
+how do i get to koramangala from here,navigation
+navigate to the nearest metro station,navigation
+show me the way to vv puram food street,navigation
+i want to visit three places today plan my route,navigation
+whats the fastest way to whitefield,navigation
+take me to jayanagar then malleshwaram,navigation
+plan a multi stop trip to mg road lalbagh and cubbon park,navigation
+route me from my hotel to the airport,navigation
+best biryani near me,food
+where can i get good dosa in bengaluru,food
+im hungry suggest a restaurant,food
+find me a rooftop restaurant,food
+good place for filter coffee,food
+where to eat non veg food nearby,food
+suggest a cheap restaurant in koramangala,food
+whats the best pizza place open late,food
+i want street food recommendations,food
+find a vegetarian restaurant near indiranagar,food
+is it safe to walk alone at night here,safety
+im a solo woman traveller is this area safe,safety
+what should i do in an emergency,safety
+where is the nearest police station,safety
+is this neighbourhood safe for tourists,safety
+what safety precautions should i take,safety
+help i feel unsafe right now,safety
+how do i contact emergency services,safety
+is public transport safe at night,safety
+whats the local emergency number,safety
+how does the metro system work here,general_info
+what is the best time to visit bengaluru,general_info
+tell me about the local weather,general_info
+what are the top attractions in the city,general_info
+how do i pay for public transport,general_info
+what language do people speak here,general_info
+whats the currency exchange rate,general_info
+tell me about local customs and etiquette,general_info
+what are the visa requirements,general_info
+how much should i budget per day,general_info
