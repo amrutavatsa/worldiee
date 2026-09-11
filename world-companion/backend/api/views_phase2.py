@@ -21,6 +21,8 @@ Endpoints:
   GET  /api/recommendations/<session>/ — rule-based recommendations
 """
 
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 import json
 import uuid
 from django.views.decorators.csrf import csrf_exempt
@@ -115,17 +117,17 @@ def hotels_search_view(request):
     return JsonResponse({"success": True, "data": data})
 
 
-@csrf_exempt
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def booking_create_view(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-    body, err = _json_body(request)
-    if err:
-        return err
+    body = request.data
+
     try:
         hotel = Hotel.objects.get(id=body["hotel_id"])
+
         booking = Booking.objects.create(
             id=uuid.uuid4(),
+            user=request.user,
             hotel=hotel,
             guest_name=body["guest_name"],
             room_type=body["room_type"],
@@ -133,182 +135,373 @@ def booking_create_view(request):
             check_out=body["check_out"],
             status="confirmed",
         )
+
     except Hotel.DoesNotExist:
         return JsonResponse({"error": "hotel not found"}, status=404)
+
     except KeyError as e:
         return JsonResponse({"error": f"missing field: {e}"}, status=400)
-    return JsonResponse({"success": True, "data": {
-        "booking_id": str(booking.id), "status": booking.status,
-        "hotel": hotel.name, "note": "This is a simulated booking — no payment was processed.",
-    }})
+
+    return JsonResponse({
+        "success": True,
+        "data": {
+            "booking_id": str(booking.id),
+            "status": booking.status,
+            "hotel": hotel.name,
+            "note": "This is a simulated booking — no payment was processed.",
+        }
+    }, status=201)
 
 
-def booking_history_view(request, session):
-    bookings = Booking.objects.filter(guest_name=session)  # simplified: session used as guest identifier
-    data = [{"id": str(b.id), "hotel": b.hotel.name, "room_type": b.room_type,
-             "check_in": str(b.check_in), "check_out": str(b.check_out), "status": b.status} for b in bookings]
-    return JsonResponse({"success": True, "data": data})
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def booking_history_view(request):
+    bookings = Booking.objects.filter(
+        user=request.user
+    ).select_related("hotel")
 
+    data = [
+        {
+            "id": str(b.id),
+            "hotel": b.hotel.name,
+            "room_type": b.room_type,
+            "check_in": str(b.check_in),
+            "check_out": str(b.check_out),
+            "status": b.status,
+        }
+        for b in bookings
+    ]
+
+    return JsonResponse({
+        "success": True,
+        "data": data,
+    })
 
 # ---------- Emergency Contacts & SOS ----------
 
-@csrf_exempt
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def emergency_contact_create_view(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-    body, err = _json_body(request)
-    if err:
-        return err
+    body = request.data
+
     try:
         contact = EmergencyContact.objects.create(
             id=uuid.uuid4(),
-            owner_session=body["session"],
+            user=request.user,
             name=body["name"],
             phone=body["phone"],
             relationship=body.get("relationship", ""),
         )
     except KeyError as e:
-        return JsonResponse({"error": f"missing field: {e}"}, status=400)
-    return JsonResponse({"success": True, "data": {"id": str(contact.id)}})
+        return JsonResponse(
+            {"error": f"missing field: {e}"},
+            status=400,
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "id": str(contact.id),
+            },
+        }
+    )
 
 
-def emergency_contact_list_view(request, session):
-    contacts = EmergencyContact.objects.filter(owner_session=session)
-    data = [{"id": str(c.id), "name": c.name, "phone": c.phone, "relationship": c.relationship} for c in contacts]
-    return JsonResponse({"success": True, "data": data})
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def emergency_contact_list_view(request):
+    contacts = EmergencyContact.objects.filter(
+        user=request.user
+    )
+
+    data = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "phone": c.phone,
+            "relationship": c.relationship,
+        }
+        for c in contacts
+    ]
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": data,
+        }
+    )
 
 
-@csrf_exempt
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def sos_trigger_view(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-    body, err = _json_body(request)
-    if err:
-        return err
+    body = request.data
+
     event = SOSEvent.objects.create(
         id=uuid.uuid4(),
-        owner_session=body.get("session", "anonymous"),
+        user=request.user,
         status="countdown",
         latitude=body.get("latitude"),
         longitude=body.get("longitude"),
     )
-    return JsonResponse({"success": True, "data": {"id": str(event.id), "status": event.status}})
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "id": str(event.id),
+                "status": event.status,
+            },
+        }
+    )
 
 
-@csrf_exempt
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def sos_activate_view(request, event_id):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
     try:
-        event = SOSEvent.objects.get(id=event_id)
+        event = SOSEvent.objects.get(
+            id=event_id,
+            user=request.user,
+        )
     except SOSEvent.DoesNotExist:
-        return JsonResponse({"error": "SOS event not found"}, status=404)
+        return JsonResponse(
+            {"error": "SOS event not found"},
+            status=404,
+        )
 
-    contacts = EmergencyContact.objects.filter(owner_session=event.owner_session)
+    contacts = EmergencyContact.objects.filter(
+        user=request.user
+    )
+
     event.status = "active"
     event.notified_contacts = [str(c.id) for c in contacts]
     event.save()
-    return JsonResponse({
-        "success": True,
-        "data": {
-            "id": str(event.id), "status": event.status,
-            "notified": [c.name for c in contacts],
-            "note": "Simulated notification — no real SMS/call was sent in this phase.",
-        },
-    })
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "id": str(event.id),
+                "status": event.status,
+                "notified": [c.name for c in contacts],
+                "note": (
+                    "Simulated notification — no real SMS/call "
+                    "was sent in this phase."
+                ),
+            },
+        }
+    )
 
 
-@csrf_exempt
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def sos_resolve_view(request, event_id):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
     try:
-        event = SOSEvent.objects.get(id=event_id)
+        event = SOSEvent.objects.get(
+            id=event_id,
+            user=request.user,
+        )
     except SOSEvent.DoesNotExist:
-        return JsonResponse({"error": "SOS event not found"}, status=404)
+        return JsonResponse(
+            {"error": "SOS event not found"},
+            status=404,
+        )
+
     event.status = "resolved"
     event.resolved_at = timezone.now()
     event.save()
-    return JsonResponse({"success": True, "data": {"id": str(event.id), "status": event.status}})
 
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "id": str(event.id),
+                "status": event.status,
+            },
+        }
+    )
 
 # ---------- Smart Itinerary Planning ----------
 
-@csrf_exempt
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def itinerary_create_view(request):
-    """Body: { session, title, stops: [{ day_number, place_id, scheduled_time, notes }] } """
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-    body, err = _json_body(request)
-    if err:
-        return err
+    """
+    Body:
+    {
+        "title": "My Trip",
+        "stops": [
+            {
+                "day_number": 1,
+                "place_id": "...",
+                "scheduled_time": "10:00",
+                "notes": "Visit in the morning"
+            }
+        ]
+    }
+    """
+    body = request.data
+
     itinerary = Itinerary.objects.create(
         id=uuid.uuid4(),
-        owner_session=body.get("session", "anonymous"),
+        user=request.user,
         title=body.get("title", "My Trip"),
     )
+
     for i, stop in enumerate(body.get("stops", [])):
         try:
             place = Place.objects.get(id=stop["place_id"])
-        except Place.DoesNotExist:
+        except (Place.DoesNotExist, KeyError):
             continue
+
         ItineraryStop.objects.create(
-            itinerary=itinerary, day_number=stop.get("day_number", 1), order=i,
-            place=place, scheduled_time=stop.get("scheduled_time", ""), notes=stop.get("notes", ""),
+            itinerary=itinerary,
+            day_number=stop.get("day_number", 1),
+            order=i,
+            place=place,
+            scheduled_time=stop.get("scheduled_time", ""),
+            notes=stop.get("notes", ""),
         )
-    return JsonResponse({"success": True, "data": {"id": str(itinerary.id)}})
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "id": str(itinerary.id),
+            },
+        },
+        status=201,
+    )
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def itinerary_detail_view(request, itinerary_id):
     try:
-        itinerary = Itinerary.objects.get(id=itinerary_id)
+        itinerary = Itinerary.objects.get(
+            id=itinerary_id,
+            user=request.user,
+        )
     except Itinerary.DoesNotExist:
-        return JsonResponse({"error": "itinerary not found"}, status=404)
-    stops = itinerary.stops.select_related("place").all()
-    days = {}
-    for s in stops:
-        days.setdefault(s.day_number, []).append({
-            "place": s.place.name, "scheduled_time": s.scheduled_time, "notes": s.notes,
-        })
-    return JsonResponse({"success": True, "data": {"title": itinerary.title, "days": days}})
+        return JsonResponse(
+            {"error": "itinerary not found"},
+            status=404,
+        )
 
+    stops = itinerary.stops.select_related("place").all()
+
+    days = {}
+
+    for s in stops:
+        days.setdefault(s.day_number, []).append(
+            {
+                "place": s.place.name,
+                "scheduled_time": s.scheduled_time,
+                "notes": s.notes,
+            }
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "id": str(itinerary.id),
+                "title": itinerary.title,
+                "days": days,
+            },
+        }
+    )
 
 # ---------- Preferences & Rule-Based Recommendations ----------
 
 @csrf_exempt
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def preferences_save_view(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-    body, err = _json_body(request)
-    if err:
-        return err
+    """
+    Save or update travel preferences for the authenticated user.
+    """
+
+    body = request.data
+
     pref, _ = UserPreference.objects.update_or_create(
-        owner_session=body.get("session", "anonymous"),
+        user=request.user,
         defaults={
             "interests": body.get("interests", []),
             "budget": body.get("budget", "mid-range"),
             "travel_style": body.get("travel_style", ""),
         },
     )
-    return JsonResponse({"success": True, "data": {"session": pref.owner_session}})
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "user_id": request.user.id,
+                "username": request.user.username,
+                "interests": pref.interests,
+                "budget": pref.budget,
+                "travel_style": pref.travel_style,
+            },
+        }
+    )
 
 
-def recommendations_view(request, session):
-    """Rule-based recommendation: score each Place by tag overlap with the
-    user's stated interests. This is intentionally NOT collaborative
-    filtering — see PRD/paper Phase 2 note: real CF needs interaction data
-    this phase doesn't have yet."""
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def recommendations_view(request):
+    """
+    Rule-based recommendation: score each Place by tag overlap with the
+    authenticated user's stated interests.
+
+    This is intentionally NOT collaborative filtering.
+    Real collaborative filtering requires interaction data that this
+    phase does not have yet.
+    """
+
     try:
-        pref = UserPreference.objects.get(owner_session=session)
+        pref = UserPreference.objects.get(user=request.user)
+
     except UserPreference.DoesNotExist:
-        return JsonResponse({"success": True, "data": [], "note": "No preferences saved yet for this session."})
+        return JsonResponse(
+            {
+                "success": True,
+                "data": [],
+                "note": "No preferences saved yet for this user.",
+            }
+        )
 
     interests = set(pref.interests)
+
     scored = []
+
     for place in Place.objects.all():
-        overlap = len(interests.intersection(set(place.tags)))
+        overlap = len(
+            interests.intersection(set(place.tags))
+        )
+
         scored.append((overlap, place))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top = [{"id": p.id, "name": p.name, "category": p.category, "match_score": score}
-           for score, p in scored[:5]]
-    return JsonResponse({"success": True, "data": top})
+
+    scored.sort(
+        key=lambda x: x[0],
+        reverse=True
+    )
+
+    top = [
+        {
+            "id": p.id,
+            "name": p.name,
+            "category": p.category,
+            "match_score": score,
+        }
+        for score, p in scored[:5]
+    ]
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": top,
+        }
+    )

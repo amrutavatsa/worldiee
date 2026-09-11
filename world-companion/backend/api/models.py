@@ -11,6 +11,7 @@ are sequenced last per the build plan.
 """
 
 from django.db import models
+from django.contrib.auth.models import User
 import uuid
 
 
@@ -73,16 +74,34 @@ class Booking(models.Model):
         ("confirmed", "Confirmed"),
         ("cancelled", "Cancelled"),
     ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, related_name="bookings")
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="bookings",
+        null=True,
+        blank=True,
+    )
+
+    hotel = models.ForeignKey(
+        Hotel,
+        on_delete=models.CASCADE,
+        related_name="bookings",
+    )
+
     guest_name = models.CharField(max_length=200)
     room_type = models.CharField(max_length=100)
     check_in = models.DateField()
     check_out = models.DateField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="confirmed")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="confirmed",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
-
-
+    
 class Review(models.Model):
     """Review & rating for any Place or Hotel — simple generic-target model."""
     TARGET_TYPE_CHOICES = [("place", "Place"), ("hotel", "Hotel")]
@@ -102,11 +121,16 @@ class EmergencyContact(models.Model):
     """A traveller's emergency contact for SOS notification (simulated —
     no real SMS/telecom integration in this phase)."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    owner_session = models.CharField(max_length=128)  # lightweight session/device id, no full auth system yet
+
+    user = models.ForeignKey(
+    User,
+    on_delete=models.CASCADE,
+    related_name="emergency_contacts",
+    )
+
     name = models.CharField(max_length=120)
     phone = models.CharField(max_length=32)
     relationship = models.CharField(max_length=64, blank=True, default="")
-
 
 class SOSEvent(models.Model):
     """An SOS trigger event — countdown -> active -> resolved lifecycle."""
@@ -116,20 +140,43 @@ class SOSEvent(models.Model):
         ("resolved", "Resolved"),
         ("cancelled", "Cancelled"),
     ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    owner_session = models.CharField(max_length=128)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="countdown")
+
+    user = models.ForeignKey(
+    User,
+    on_delete=models.CASCADE,
+    related_name="sos_events",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="countdown",
+    )
+
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
+
     triggered_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
-    notified_contacts = models.JSONField(default=list, blank=True)  # list of EmergencyContact ids notified (simulated)
+
+    notified_contacts = models.JSONField(
+        default=list,
+        blank=True,
+    )  # list of EmergencyContact ids notified (simulated)
 
 
 class Itinerary(models.Model):
     """A day-wise travel plan — builds on the existing A* routing engine."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    owner_session = models.CharField(max_length=128)
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="itineraries",
+    )
+
     title = models.CharField(max_length=200, default="My Trip")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -151,7 +198,10 @@ class UserPreference(models.Model):
     """Structured preference profile used for rule-based recommendations
     (per the paper: real collaborative filtering needs interaction data
     this phase doesn't have yet — see PRD Phase 2 note)."""
-    owner_session = models.CharField(max_length=128, unique=True)
+    user = models.OneToOneField(
+    User,
+    on_delete=models.CASCADE,
+    )
     interests = models.JSONField(default=list, blank=True)  # e.g. ["nature", "history", "food"]
     budget = models.CharField(max_length=20, default="mid-range")  # budget / mid-range / luxury
     travel_style = models.CharField(max_length=50, blank=True, default="")
