@@ -375,6 +375,24 @@ def itinerary_create_view(request):
         status=201,
     )
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def itinerary_list_view(request):
+    itineraries = request.user.itineraries.order_by("-created_at")
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": [
+                {
+                    "id": str(itinerary.id),
+                    "title": itinerary.title,
+                    "created_at": itinerary.created_at.isoformat(),
+                }
+                for itinerary in itineraries
+            ],
+        }
+    )
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])

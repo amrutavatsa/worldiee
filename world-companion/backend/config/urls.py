@@ -39,6 +39,7 @@ urlpatterns = [
 
     # Phase 2 — itinerary planning
     path("api/itinerary/create/", v2.itinerary_create_view),
+    path("api/itinerary/", v2.itinerary_list_view),
     path("api/itinerary/<uuid:itinerary_id>/", v2.itinerary_detail_view),
 
     # Phase 2 — preferences & rule-based recommendations
