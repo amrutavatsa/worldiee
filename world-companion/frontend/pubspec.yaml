@@ -9,11 +9,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
   http: ^1.2.0
   shared_preferences: ^2.5.3
-  #record: ^5.1.0          # microphone capture for voice input
+  flutter_markdown_plus: ^1.0.0+1
+
+  #record: ^5.1.0
   #permission_handler: ^11.3.0
-  #google_maps_flutter: ^2.6.0   # for displaying the computed route (needs your own Maps API key)
+  #google_maps_flutter: ^2.6.0
 
 dev_dependencies:
   flutter_test:

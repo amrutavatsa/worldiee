@@ -305,10 +305,8 @@ class ApiService {
       Uri.parse("$baseUrl/api/sos/trigger/"),
       headers: await _headers(),
       body: jsonEncode({
-        if (latitude != null)
-          "latitude": latitude,
-        if (longitude != null)
-          "longitude": longitude,
+        if (latitude != null) "latitude": latitude,
+        if (longitude != null) "longitude": longitude,
       }),
     );
 
@@ -364,22 +362,23 @@ class ApiService {
 
     return jsonDecode(res.body)["data"];
   }
+
   static Future<List<Map<String, dynamic>>> getItineraries() async {
-  final res = await http.get(
-    Uri.parse("$baseUrl/api/itinerary/"),
-    headers: await _headers(),
-  );
+    final res = await http.get(
+      Uri.parse("$baseUrl/api/itinerary/"),
+      headers: await _headers(),
+    );
 
-  _checkOk(res);
+    _checkOk(res);
 
-  final body = jsonDecode(res.body);
+    final body = jsonDecode(res.body);
 
-  return List<Map<String, dynamic>>.from(
-    (body["data"] as List).map(
-      (item) => Map<String, dynamic>.from(item),
-    ),
-  );
-}
+    return List<Map<String, dynamic>>.from(
+      (body["data"] as List).map(
+        (item) => Map<String, dynamic>.from(item),
+      ),
+    );
+  }
 
   static Future<Map<String, dynamic>> getItinerary(
     String itineraryId,
@@ -431,5 +430,27 @@ class ApiService {
     _checkOk(res);
 
     return jsonDecode(res.body)["data"];
+  }
+
+  // ---------------------------------------------------------------------------
+  // WorldCompanion AI Assistant
+  // ---------------------------------------------------------------------------
+
+  static Future<Map<String, dynamic>> sendAssistantMessage(
+    String message,
+  ) async {
+    final res = await http.post(
+      Uri.parse("$baseUrl/api/assistant/"),
+      headers: await _headers(),
+      body: jsonEncode({
+        "message": message,
+      }),
+    );
+
+    _checkOk(res);
+
+    final body = jsonDecode(res.body);
+
+    return Map<String, dynamic>.from(body);
   }
 }

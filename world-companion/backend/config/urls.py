@@ -3,6 +3,7 @@ from django.urls import path
 from django.contrib import admin
 from api import views
 from api import views_phase2 as v2
+from api.assistant.views import assistant_view
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -10,6 +11,7 @@ urlpatterns = [
     path("api/auth/register/", register_view),
     path("api/auth/login/", login_view),
     path("api/auth/profile/", profile_view),
+    path("api/assistant/", assistant_view),
 
     # Phase 1 — voice/intent + routing
     path("api/intent/", views.intent_view),

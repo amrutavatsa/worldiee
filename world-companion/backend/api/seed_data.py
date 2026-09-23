@@ -17,7 +17,7 @@ def seed():
                 "category": info.get("category", "area"),
                 "latitude": info["lat"],
                 "longitude": info["lon"],
-                "tags": [info.get("category", "area")],
+                "tags": info.get("tags", [info.get("category", "area")]),
             },
         )
     print(f"Seeded {Place.objects.count()} places.")
