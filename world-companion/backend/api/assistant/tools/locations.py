@@ -1,22 +1,18 @@
-from api.models import Place
+from places.geoapify_provider import geocode_location
 
 
 def resolve_location(place_name):
     if not place_name:
         return None
 
-    place = (
-        Place.objects
-        .filter(name__icontains=place_name)
-        .first()
-    )
+    location = geocode_location(place_name)
 
-    if not place:
+    if not location:
         return None
 
     return {
-        "id": place.id,
-        "name": place.name,
-        "latitude": place.latitude,
-        "longitude": place.longitude,
+        "name": location["name"],
+        "latitude": location["latitude"],
+        "longitude": location["longitude"],
+        "address": location.get("address", ""),
     }

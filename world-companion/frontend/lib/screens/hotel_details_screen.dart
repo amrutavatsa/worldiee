@@ -1,4 +1,10 @@
 import 'package:flutter/material.dart';
+
+import '../theme/world_companion_colors.dart';
+import '../theme/world_companion_elevation.dart';
+import '../theme/world_companion_radius.dart';
+import '../theme/world_companion_spacing.dart';
+import '../theme/world_companion_typography.dart';
 import 'booking_screen.dart';
 
 class HotelDetailsScreen extends StatelessWidget {
@@ -20,9 +26,7 @@ class HotelDetailsScreen extends StatelessWidget {
   double _rating() {
     final value = hotel['rating'];
 
-    if (value is num) {
-      return value.toDouble();
-    }
+    if (value is num) return value.toDouble();
 
     return double.tryParse(value?.toString() ?? '') ?? 0;
   }
@@ -30,9 +34,7 @@ class HotelDetailsScreen extends StatelessWidget {
   double _pricePerNight() {
     final value = hotel['price_per_night'];
 
-    if (value is num) {
-      return value.toDouble();
-    }
+    if (value is num) return value.toDouble();
 
     return double.tryParse(value?.toString() ?? '') ?? 0;
   }
@@ -56,17 +58,15 @@ class HotelDetailsScreen extends StatelessWidget {
     if (value is List) {
       return value
           .whereType<Map>()
-          .map(
-            (room) => Map<String, dynamic>.from(room),
-          )
+          .map((room) => Map<String, dynamic>.from(room))
           .toList();
     }
 
     return [];
   }
 
-  String _formatFacility(String facility) {
-    return facility
+  String _formatLabel(String value) {
+    return value
         .replaceAll('_', ' ')
         .split(' ')
         .map(
@@ -77,78 +77,70 @@ class HotelDetailsScreen extends StatelessWidget {
         .join(' ');
   }
 
-  String _formatRoomType(String type) {
-    return type
-        .replaceAll('_', ' ')
-        .split(' ')
-        .map(
-          (word) => word.isEmpty
-              ? word
-              : '${word[0].toUpperCase()}${word.substring(1)}',
-        )
-        .join(' ');
+  String _formatPrice(double price) {
+    return '₹${price.toStringAsFixed(0)}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final facilities = _facilities();
     final rooms = _roomTypes();
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: WorldCompanionColors.aiSurface,
       appBar: AppBar(
         title: const Text('Stay details'),
-        elevation: 0,
-        backgroundColor: theme.scaffoldBackgroundColor,
-        foregroundColor: const Color(0xFF172326),
+        backgroundColor: WorldCompanionColors.surface,
+        foregroundColor: WorldCompanionColors.deepOcean,
+        elevation: WorldCompanionElevation.none,
+        scrolledUnderElevation: WorldCompanionElevation.none,
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(
+            height: 1,
+            thickness: 1,
+            color: WorldCompanionColors.border,
+          ),
+        ),
       ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
             final isWide = constraints.maxWidth >= 800;
 
-            final content = Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildHeader(context),
-                const SizedBox(height: 20),
-                _buildQuickStats(context),
-                const SizedBox(height: 28),
-                if (facilities.isNotEmpty) ...[
-                  _buildSectionTitle(
-                    context,
-                    'Facilities',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildFacilities(context, facilities),
-                  const SizedBox(height: 28),
-                ],
-                if (rooms.isNotEmpty) ...[
-                  _buildSectionTitle(
-                    context,
-                    'Room types',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildRoomTypes(context, rooms),
-                  const SizedBox(height: 28),
-                ],
-                _buildBookingCard(context, hotel),
-                const SizedBox(height: 24),
-              ],
-            );
-
             return SingleChildScrollView(
               padding: EdgeInsets.symmetric(
-                horizontal: isWide ? 48 : 20,
-                vertical: 20,
+                horizontal: isWide
+                    ? WorldCompanionSpacing.desktopPage
+                    : WorldCompanionSpacing.mobilePage,
+                vertical: WorldCompanionSpacing.lg,
               ),
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 1100,
+                  constraints: const BoxConstraints(maxWidth: 1000),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildHeader(context),
+                      const SizedBox(height: WorldCompanionSpacing.lg),
+                      _buildQuickStats(context),
+                      if (facilities.isNotEmpty) ...[
+                        const SizedBox(height: WorldCompanionSpacing.xl),
+                        _buildSectionTitle(context, 'Facilities'),
+                        const SizedBox(height: WorldCompanionSpacing.md),
+                        _buildFacilities(facilities),
+                      ],
+                      if (rooms.isNotEmpty) ...[
+                        const SizedBox(height: WorldCompanionSpacing.xl),
+                        _buildSectionTitle(context, 'Room types'),
+                        const SizedBox(height: WorldCompanionSpacing.md),
+                        _buildRoomTypes(rooms),
+                      ],
+                      const SizedBox(height: WorldCompanionSpacing.xl),
+                      _buildBookingCard(context),
+                      const SizedBox(height: WorldCompanionSpacing.lg),
+                    ],
                   ),
-                  child: content,
                 ),
               ),
             );
@@ -159,22 +151,20 @@ class HotelDetailsScreen extends StatelessWidget {
   }
 
   Widget _buildHeader(BuildContext context) {
-    final theme = Theme.of(context);
+    final textTheme = WorldCompanionTypography.textTheme;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: const Color(0xFFDCE5E4),
-        ),
-        boxShadow: [
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.extraLarge),
+        border: Border.all(color: WorldCompanionColors.border),
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Color(0x080B2545),
             blurRadius: 24,
-            offset: const Offset(0, 10),
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -182,44 +172,72 @@ class HotelDetailsScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: 68,
+            height: 68,
             decoration: BoxDecoration(
-              color: const Color(0xFFDFF4F1),
-              borderRadius: BorderRadius.circular(20),
+              color: WorldCompanionColors.infoSurface,
+              borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
             ),
             child: const Icon(
               Icons.hotel_rounded,
-              size: 32,
-              color: Color(0xFF0E7774),
+              size: 34,
+              color: WorldCompanionColors.oceanBlue,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: WorldCompanionSpacing.lg),
           Text(
             _hotelName(),
-            style: theme.textTheme.headlineSmall?.copyWith(
+            style: textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w700,
-              color: const Color(0xFF172326),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: WorldCompanionSpacing.sm),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Icon(
                 Icons.location_on_outlined,
-                size: 18,
-                color: Color(0xFF68777B),
+                size: 20,
+                color: WorldCompanionColors.secondaryText,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: WorldCompanionSpacing.xs),
               Expanded(
                 child: Text(
                   _area(),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF68777B),
-                  ),
+                  style: textTheme.bodyMedium,
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: WorldCompanionSpacing.lg),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: WorldCompanionSpacing.md,
+              vertical: WorldCompanionSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              color: WorldCompanionColors.infoSurface,
+              borderRadius: BorderRadius.circular(WorldCompanionRadius.medium),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.verified_user_outlined,
+                  size: 17,
+                  color: WorldCompanionColors.oceanBlue,
+                ),
+                const SizedBox(width: WorldCompanionSpacing.xs),
+                Flexible(
+                  child: Text(
+                    'Stay information',
+                    style: textTheme.labelMedium?.copyWith(
+                      color: WorldCompanionColors.oceanBlue,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -227,71 +245,74 @@ class HotelDetailsScreen extends StatelessWidget {
   }
 
   Widget _buildQuickStats(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 360;
 
-    return Row(
-      children: [
-        Expanded(
-          child: _statCard(
-            context,
-            icon: Icons.star_rounded,
-            label: 'Rating',
-            value: _rating().toStringAsFixed(1),
-            iconColor: const Color(0xFFF27C4A),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _statCard(
-            context,
-            icon: Icons.currency_rupee_rounded,
-            label: 'Per night',
-            value: _pricePerNight().toStringAsFixed(0),
-            iconColor: const Color(0xFF0E7774),
-          ),
-        ),
-      ],
+        return Row(
+          children: [
+            Expanded(
+              child: _statCard(
+                icon: Icons.star_rounded,
+                label: 'Guest rating',
+                value: _rating().toStringAsFixed(1),
+                iconColor: WorldCompanionColors.warning,
+                compact: compact,
+              ),
+            ),
+            const SizedBox(width: WorldCompanionSpacing.md),
+            Expanded(
+              child: _statCard(
+                icon: Icons.nightlight_round,
+                label: 'Price per night',
+                value: _formatPrice(_pricePerNight()),
+                iconColor: WorldCompanionColors.oceanBlue,
+                compact: compact,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _statCard(
-    BuildContext context, {
+  Widget _statCard({
     required IconData icon,
     required String label,
     required String value,
     required Color iconColor,
+    required bool compact,
   }) {
-    final theme = Theme.of(context);
+    final textTheme = WorldCompanionTypography.textTheme;
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(
+        compact ? WorldCompanionSpacing.md : WorldCompanionSpacing.lg,
+      ),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: const Color(0xFFDCE5E4),
-        ),
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
+        border: Border.all(color: WorldCompanionColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            icon,
-            color: iconColor,
-            size: 24,
-          ),
-          const SizedBox(height: 12),
+          Icon(icon, color: iconColor, size: 25),
+          const SizedBox(height: WorldCompanionSpacing.md),
           Text(
             label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF68777B),
-            ),
+            style: textTheme.bodySmall,
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: const Color(0xFF172326),
+          const SizedBox(height: WorldCompanionSpacing.xs),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: WorldCompanionColors.deepOcean,
+              ),
             ),
           ),
         ],
@@ -299,37 +320,29 @@ class HotelDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionTitle(
-    BuildContext context,
-    String title,
-  ) {
-    final theme = Theme.of(context);
-
+  Widget _buildSectionTitle(BuildContext context, String title) {
     return Text(
       title,
-      style: theme.textTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.w700,
-        color: const Color(0xFF172326),
-      ),
+      style: WorldCompanionTypography.textTheme.headlineSmall,
     );
   }
 
-  Widget _buildFacilities(
-    BuildContext context,
-    List<String> facilities,
-  ) {
+  Widget _buildFacilities(List<String> facilities) {
     return Wrap(
-      spacing: 10,
-      runSpacing: 10,
+      spacing: WorldCompanionSpacing.sm,
+      runSpacing: WorldCompanionSpacing.sm,
       children: facilities.map((facility) {
         return Container(
           padding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 10,
+            horizontal: WorldCompanionSpacing.md,
+            vertical: WorldCompanionSpacing.sm,
           ),
           decoration: BoxDecoration(
-            color: const Color(0xFFDFF4F1),
-            borderRadius: BorderRadius.circular(100),
+            color: WorldCompanionColors.successSurface,
+            borderRadius: BorderRadius.circular(WorldCompanionRadius.pill),
+            border: Border.all(
+              color: WorldCompanionColors.success.withOpacity(0.15),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -337,15 +350,13 @@ class HotelDetailsScreen extends StatelessWidget {
               const Icon(
                 Icons.check_circle_outline_rounded,
                 size: 17,
-                color: Color(0xFF0E7774),
+                color: WorldCompanionColors.success,
               ),
-              const SizedBox(width: 7),
+              const SizedBox(width: WorldCompanionSpacing.xs),
               Text(
-                _formatFacility(facility),
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF123B43),
+                _formatLabel(facility),
+                style: WorldCompanionTypography.textTheme.labelMedium?.copyWith(
+                  color: WorldCompanionColors.deepOcean,
                 ),
               ),
             ],
@@ -355,10 +366,9 @@ class HotelDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildRoomTypes(
-    BuildContext context,
-    List<Map<String, dynamic>> rooms,
-  ) {
+  Widget _buildRoomTypes(List<Map<String, dynamic>> rooms) {
+    final textTheme = WorldCompanionTypography.textTheme;
+
     return Column(
       children: rooms.map((room) {
         final type = room['type']?.toString() ?? 'Room';
@@ -366,53 +376,47 @@ class HotelDetailsScreen extends StatelessWidget {
 
         final price = priceValue is num
             ? priceValue.toDouble()
-            : double.tryParse(
-                  priceValue?.toString() ?? '',
-                ) ??
-                0;
+            : double.tryParse(priceValue?.toString() ?? '') ?? 0;
 
         return Container(
           width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(18),
+          margin: const EdgeInsets.only(bottom: WorldCompanionSpacing.md),
+          padding: const EdgeInsets.all(WorldCompanionSpacing.md),
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: const Color(0xFFDCE5E4),
-            ),
+            color: WorldCompanionColors.surface,
+            borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
+            border: Border.all(color: WorldCompanionColors.border),
           ),
           child: Row(
             children: [
               Container(
-                width: 46,
-                height: 46,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF7F9F8),
-                  borderRadius: BorderRadius.circular(14),
+                  color: WorldCompanionColors.infoSurface,
+                  borderRadius: BorderRadius.circular(
+                    WorldCompanionRadius.medium,
+                  ),
                 ),
                 child: const Icon(
                   Icons.bed_rounded,
-                  color: Color(0xFF0E7774),
+                  color: WorldCompanionColors.oceanBlue,
+                  size: 25,
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: WorldCompanionSpacing.md),
               Expanded(
                 child: Text(
-                  _formatRoomType(type),
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF172326),
-                  ),
+                  _formatLabel(type),
+                  style: textTheme.titleMedium,
                 ),
               ),
+              const SizedBox(width: WorldCompanionSpacing.sm),
               Text(
-                '₹${price.toStringAsFixed(0)}',
-                style: const TextStyle(
-                  fontSize: 15,
+                _formatPrice(price),
+                style: textTheme.titleMedium?.copyWith(
+                  color: WorldCompanionColors.oceanBlue,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF0E7774),
                 ),
               ),
             ],
@@ -422,73 +426,78 @@ class HotelDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildBookingCard(BuildContext context, Map<String, dynamic> hotel) {
+  Widget _buildBookingCard(BuildContext context) {
+    final textTheme = WorldCompanionTypography.textTheme;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
       decoration: BoxDecoration(
-        color: const Color(0xFF123B43),
-        borderRadius: BorderRadius.circular(24),
+        color: WorldCompanionColors.deepOcean,
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.extraLarge),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Ready to stay here?',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 19,
-              fontWeight: FontWeight.w700,
-            ),
+          const Icon(
+            Icons.luggage_rounded,
+            size: 30,
+            color: WorldCompanionColors.softBlue,
           ),
-          const SizedBox(height: 7),
+          const SizedBox(height: WorldCompanionSpacing.md),
           Text(
-            'Choose your room and continue with the booking.',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.78),
-              fontSize: 13,
-              height: 1.4,
+            'Ready to stay here?',
+            style: textTheme.headlineSmall?.copyWith(
+              color: Colors.white,
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: WorldCompanionSpacing.sm),
+          Text(
+            'Review your stay details and continue to booking.',
+            style: textTheme.bodyMedium?.copyWith(
+              color: Colors.white.withOpacity(0.78),
+            ),
+          ),
+          const SizedBox(height: WorldCompanionSpacing.lg),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton(
+            child: ElevatedButton.icon(
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  MaterialPageRoute<void>(
                     builder: (_) => BookingScreen(hotel: hotel),
                   ),
                 );
               },
+              icon: const Icon(Icons.arrow_forward_rounded),
+              label: const Text('Book this stay'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFF27C4A),
-                foregroundColor: Colors.white,
+                backgroundColor: WorldCompanionColors.softWhite,
+                foregroundColor: WorldCompanionColors.deepOcean,
+                elevation: WorldCompanionElevation.none,
                 padding: const EdgeInsets.symmetric(
-                  vertical: 15,
+                  horizontal: WorldCompanionSpacing.lg,
+                  vertical: WorldCompanionSpacing.md,
                 ),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(
+                    WorldCompanionRadius.medium,
+                  ),
                 ),
-              ),
-              child: const Text(
-                'Book this stay',
-                style: TextStyle(
+                textStyle: textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w700,
-                  fontSize: 14,
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: WorldCompanionSpacing.md),
           Center(
             child: Text(
               'Booking is simulated in the current project backend.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.60),
-                fontSize: 11,
+              style: textTheme.bodySmall?.copyWith(
+                color: Colors.white.withOpacity(0.62),
               ),
             ),
           ),

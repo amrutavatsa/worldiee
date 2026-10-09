@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
+import '../theme/world_companion_colors.dart';
+import '../theme/world_companion_elevation.dart';
+import '../theme/world_companion_radius.dart';
+import '../theme/world_companion_spacing.dart';
+import '../theme/world_companion_typography.dart';
 
 class ReviewsScreen extends StatefulWidget {
   final String targetType;
@@ -33,6 +38,8 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
   }
 
   Future<void> _loadReviews() async {
+    if (!mounted) return;
+
     setState(() {
       _loading = true;
       _error = null;
@@ -68,7 +75,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
 
         _loading = false;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
 
       setState(() {
@@ -80,23 +87,29 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: WorldCompanionColors.softWhite,
       appBar: AppBar(
-        title: const Text('Reviews'),
-        backgroundColor: theme.scaffoldBackgroundColor,
-        foregroundColor: theme.colorScheme.onSurface,
-        elevation: 0,
+        title: Text(
+          'Reviews',
+          style: WorldCompanionTypography.textTheme.titleLarge,
+        ),
+        backgroundColor: WorldCompanionColors.softWhite,
+        foregroundColor: WorldCompanionColors.primaryText,
+        elevation: WorldCompanionElevation.none,
+        scrolledUnderElevation: WorldCompanionElevation.none,
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadReviews,
-        child: _buildBody(theme),
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _loadReviews,
+          color: WorldCompanionColors.oceanBlue,
+          backgroundColor: WorldCompanionColors.surface,
+          child: _buildBody(),
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddReviewSheet,
-        backgroundColor: theme.colorScheme.primary,
+        backgroundColor: WorldCompanionColors.deepOcean,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.rate_review_outlined),
         label: const Text('Write a review'),
@@ -104,170 +117,106 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     );
   }
 
-  Widget _buildBody(ThemeData theme) {
+  Widget _buildBody() {
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-
-    if (_error != null) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(24),
         children: [
-          const SizedBox(height: 100),
-          Icon(
-            Icons.cloud_off_rounded,
-            size: 52,
-            color: Colors.grey.shade400,
-          ),
-          const SizedBox(height: 16),
-          Center(
-            child: Text(
-              _error!,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade700,
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.55,
+            child: const Center(
+              child: CircularProgressIndicator(
+                color: WorldCompanionColors.oceanBlue,
               ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Center(
-            child: OutlinedButton(
-              onPressed: _loadReviews,
-              child: const Text('Try again'),
             ),
           ),
         ],
       );
     }
 
+    if (_error != null) {
+      return _buildErrorState();
+    }
+
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+      padding: const EdgeInsets.fromLTRB(
+        WorldCompanionSpacing.mobilePage,
+        WorldCompanionSpacing.md,
+        WorldCompanionSpacing.mobilePage,
+        112,
+      ),
       children: [
-        Text(
-          widget.placeName,
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'What travelers are saying',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: Colors.grey.shade600,
-          ),
-        ),
-        const SizedBox(height: 24),
-
-        _buildRatingSummary(theme),
-
-        const SizedBox(height: 28),
-
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Traveler reviews',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            Text(
-              '$_reviewCount',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 14),
-
+        _buildHero(),
+        const SizedBox(height: WorldCompanionSpacing.xl),
+        _buildRatingSummary(),
+        const SizedBox(height: WorldCompanionSpacing.xl),
+        _buildReviewsHeading(),
+        const SizedBox(height: WorldCompanionSpacing.md),
         if (_reviews.isEmpty)
-          _buildEmptyState(theme)
+          _buildEmptyState()
         else
           ..._reviews.map(
             (review) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _buildReviewCard(
-                theme,
-                review,
+              padding: const EdgeInsets.only(
+                bottom: WorldCompanionSpacing.md,
               ),
+              child: _buildReviewCard(review),
             ),
           ),
       ],
     );
   }
 
-  Widget _buildRatingSummary(ThemeData theme) {
-    final rating = _averageRating;
-
+  Widget _buildHero() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: Colors.grey.shade200,
+        gradient: const LinearGradient(
+          colors: [
+            WorldCompanionColors.deepOcean,
+            WorldCompanionColors.oceanBlue,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 72,
-            height: 72,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(18),
+              color: Colors.white.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(
+                WorldCompanionRadius.medium,
+              ),
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  rating != null
-                      ? rating.toStringAsFixed(1)
-                      : '—',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                if (rating != null)
-                  const Icon(
-                    Icons.star_rounded,
-                    size: 17,
-                    color: Color(0xFFF27C4A),
-                  ),
-              ],
+            child: const Icon(
+              Icons.reviews_outlined,
+              color: Colors.white,
+              size: 24,
             ),
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  rating != null
-                      ? _ratingLabel(rating)
-                      : 'No ratings yet',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  _reviewCount == 1
-                      ? 'Based on 1 review'
-                      : 'Based on $_reviewCount reviews',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ],
+          const SizedBox(height: WorldCompanionSpacing.lg),
+          Text(
+            widget.placeName,
+            style: WorldCompanionTypography.textTheme.headlineMedium
+                ?.copyWith(
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: WorldCompanionSpacing.xs),
+          Text(
+            'Real experiences from fellow travelers.',
+            style: WorldCompanionTypography.textTheme.bodyMedium
+                ?.copyWith(
+              color: Colors.white.withOpacity(0.84),
+              height: 1.5,
             ),
           ),
         ],
@@ -275,31 +224,177 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     );
   }
 
-  Widget _buildReviewCard(
-    ThemeData theme,
-    Map<String, dynamic> review,
-  ) {
-    final author =
-        review['author']?.toString() ?? 'Anonymous';
+  Widget _buildRatingSummary() {
+    final rating = _averageRating;
 
-    final comment =
-        review['comment']?.toString() ?? '';
+    return Container(
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
+      decoration: BoxDecoration(
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
+        border: Border.all(
+          color: WorldCompanionColors.border,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x060B2545),
+            blurRadius: 14,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'COMMUNITY RATING',
+            style: WorldCompanionTypography.textTheme.labelMedium
+                ?.copyWith(
+              letterSpacing: 1.1,
+              color: WorldCompanionColors.oceanBlue,
+            ),
+          ),
+          const SizedBox(height: WorldCompanionSpacing.md),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 82,
+                height: 88,
+                decoration: BoxDecoration(
+                  color: WorldCompanionColors.warningSurface,
+                  borderRadius: BorderRadius.circular(
+                    WorldCompanionRadius.large,
+                  ),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      rating != null ? rating.toStringAsFixed(1) : '—',
+                      style: WorldCompanionTypography
+                          .textTheme.headlineMedium
+                          ?.copyWith(
+                        color: WorldCompanionColors.deepOcean,
+                      ),
+                    ),
+                    if (rating != null)
+                      const Icon(
+                        Icons.star_rounded,
+                        size: 20,
+                        color: WorldCompanionColors.warning,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: WorldCompanionSpacing.lg),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      rating != null
+                          ? _ratingLabel(rating)
+                          : 'No ratings yet',
+                      style: WorldCompanionTypography.textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: WorldCompanionSpacing.xs),
+                    Text(
+                      _reviewCount == 1
+                          ? 'Based on 1 review'
+                          : 'Based on $_reviewCount reviews',
+                      style: WorldCompanionTypography.textTheme.bodyMedium,
+                    ),
+                    if (rating != null) ...[
+                      const SizedBox(height: WorldCompanionSpacing.sm),
+                      _buildStars(
+                        rating.round().clamp(0, 5),
+                        size: 19,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewsHeading() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'TRAVELER VOICES',
+                style: WorldCompanionTypography.textTheme.labelMedium
+                    ?.copyWith(
+                  color: WorldCompanionColors.oceanBlue,
+                  letterSpacing: 1.1,
+                ),
+              ),
+              const SizedBox(height: WorldCompanionSpacing.xxs),
+              Text(
+                'Traveler reviews',
+                style: WorldCompanionTypography.textTheme.headlineSmall,
+              ),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: WorldCompanionSpacing.sm,
+            vertical: WorldCompanionSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            color: WorldCompanionColors.infoSurface,
+            borderRadius: BorderRadius.circular(
+              WorldCompanionRadius.pill,
+            ),
+          ),
+          child: Text(
+            '$_reviewCount ${_reviewCount == 1 ? 'review' : 'reviews'}',
+            style: WorldCompanionTypography.textTheme.labelMedium
+                ?.copyWith(
+              color: WorldCompanionColors.oceanBlue,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReviewCard(Map<String, dynamic> review) {
+    final authorValue = review['author']?.toString().trim();
+    final author = authorValue == null || authorValue.isEmpty
+        ? 'Anonymous'
+        : authorValue;
+
+    final comment = review['comment']?.toString().trim() ?? '';
 
     final rating = review['rating'] is num
-        ? (review['rating'] as num).toInt()
+        ? (review['rating'] as num).toInt().clamp(0, 5)
         : 0;
 
-    final createdAt =
-        review['created_at']?.toString();
+    final createdAt = review['created_at']?.toString();
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.md),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
         border: Border.all(
-          color: Colors.grey.shade200,
+          color: WorldCompanionColors.border,
         ),
       ),
       child: Column(
@@ -308,58 +403,48 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
           Row(
             children: [
               CircleAvatar(
-                radius: 20,
-                backgroundColor:
-                    theme.colorScheme.primary.withOpacity(0.10),
+                radius: 22,
+                backgroundColor: WorldCompanionColors.infoSurface,
                 child: Text(
-                  author.isNotEmpty
-                      ? author[0].toUpperCase()
-                      : 'A',
-                  style: TextStyle(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.bold,
+                  author[0].toUpperCase(),
+                  style: WorldCompanionTypography.textTheme.titleMedium
+                      ?.copyWith(
+                    color: WorldCompanionColors.oceanBlue,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: WorldCompanionSpacing.md),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       author,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: WorldCompanionTypography.textTheme.titleSmall,
                     ),
-                    const SizedBox(height: 3),
-                    if (createdAt != null)
+                    if (createdAt != null &&
+                        createdAt.trim().isNotEmpty) ...[
+                      const SizedBox(height: WorldCompanionSpacing.xxs),
                       Text(
                         _formatDate(createdAt),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade500,
-                        ),
+                        style: WorldCompanionTypography.textTheme.bodySmall,
                       ),
+                    ],
                   ],
                 ),
               ),
-              _buildStars(
-                rating,
-                size: 16,
-              ),
+              const SizedBox(width: WorldCompanionSpacing.xs),
+              _buildStars(rating, size: 17),
             ],
           ),
-
           if (comment.isNotEmpty) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: WorldCompanionSpacing.md),
             Text(
               comment,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                height: 1.5,
-                color: Colors.grey.shade700,
-              ),
+              style: WorldCompanionTypography.textTheme.bodyMedium
+                  ?.copyWith(height: 1.6),
             ),
           ],
         ],
@@ -380,47 +465,103 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
               ? Icons.star_rounded
               : Icons.star_outline_rounded,
           size: size,
-          color: const Color(0xFFF27C4A),
+          color: WorldCompanionColors.warning,
         ),
       ),
     );
   }
 
-  Widget _buildEmptyState(ThemeData theme) {
+  Widget _buildEmptyState() {
     return Container(
-      padding: const EdgeInsets.all(28),
+      width: double.infinity,
+      padding: const EdgeInsets.all(WorldCompanionSpacing.xl),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
         border: Border.all(
-          color: Colors.grey.shade200,
+          color: WorldCompanionColors.border,
         ),
       ),
       child: Column(
         children: [
-          Icon(
-            Icons.rate_review_outlined,
-            size: 42,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'No reviews yet',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
+          Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(
+              color: WorldCompanionColors.infoSurface,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.rate_review_outlined,
+              size: 30,
+              color: WorldCompanionColors.oceanBlue,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: WorldCompanionSpacing.lg),
+          Text(
+            'No reviews yet',
+            style: WorldCompanionTypography.textTheme.titleLarge,
+          ),
+          const SizedBox(height: WorldCompanionSpacing.xs),
           Text(
             'Be the first traveler to share an experience.',
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: Colors.grey.shade600,
-              height: 1.5,
-            ),
+            style: WorldCompanionTypography.textTheme.bodyMedium
+                ?.copyWith(height: 1.5),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
+      children: [
+        SizedBox(height: MediaQuery.sizeOf(context).height * 0.12),
+        Container(
+          padding: const EdgeInsets.all(WorldCompanionSpacing.xl),
+          decoration: BoxDecoration(
+            color: WorldCompanionColors.surface,
+            borderRadius: BorderRadius.circular(
+              WorldCompanionRadius.extraLarge,
+            ),
+            border: Border.all(
+              color: WorldCompanionColors.error.withOpacity(0.25),
+            ),
+          ),
+          child: Column(
+            children: [
+              const Icon(
+                Icons.cloud_off_rounded,
+                size: 46,
+                color: WorldCompanionColors.error,
+              ),
+              const SizedBox(height: WorldCompanionSpacing.md),
+              Text(
+                'Reviews are unavailable',
+                textAlign: TextAlign.center,
+                style: WorldCompanionTypography.textTheme.titleLarge,
+              ),
+              const SizedBox(height: WorldCompanionSpacing.xs),
+              Text(
+                _error ?? 'Unable to load reviews right now.',
+                textAlign: TextAlign.center,
+                style: WorldCompanionTypography.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: WorldCompanionSpacing.lg),
+              OutlinedButton.icon(
+                onPressed: _loadReviews,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Try again'),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -428,7 +569,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     int selectedRating = 0;
     final commentController = TextEditingController();
 
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -437,77 +578,78 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
           builder: (context, setSheetState) {
             return Padding(
               padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context)
-                    .viewInsets
-                    .bottom,
+                bottom: MediaQuery.viewInsetsOf(context).bottom,
               ),
               child: Container(
                 padding: const EdgeInsets.fromLTRB(
-                  20,
-                  12,
-                  20,
-                  24,
+                  WorldCompanionSpacing.lg,
+                  WorldCompanionSpacing.sm,
+                  WorldCompanionSpacing.lg,
+                  WorldCompanionSpacing.xl,
                 ),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(
-                    top: Radius.circular(28),
+                decoration: BoxDecoration(
+                  color: WorldCompanionColors.surface,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(
+                      WorldCompanionRadius.extraLarge,
+                    ),
                   ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x180B2545),
+                      blurRadius: 24,
+                      offset: Offset(0, -6),
+                    ),
+                  ],
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 42,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade300,
-                          borderRadius:
-                              BorderRadius.circular(20),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: WorldCompanionColors.border,
+                            borderRadius: BorderRadius.circular(
+                              WorldCompanionRadius.pill,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    const Text(
-                      'Write a review',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                      const SizedBox(height: WorldCompanionSpacing.lg),
+                      Text(
+                        'Write a review',
+                        style:
+                            WorldCompanionTypography.textTheme.headlineSmall,
                       ),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    Text(
-                      widget.placeName,
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
+                      const SizedBox(height: WorldCompanionSpacing.xs),
+                      Text(
+                        widget.placeName,
+                        style: WorldCompanionTypography.textTheme.bodyMedium,
                       ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    const Text(
-                      'Your rating',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
+                      const SizedBox(height: WorldCompanionSpacing.xl),
+                      Text(
+                        'Your rating',
+                        style: WorldCompanionTypography.textTheme.titleSmall,
                       ),
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    Row(
-                      children: List.generate(
-                        5,
-                        (index) {
+                      const SizedBox(height: WorldCompanionSpacing.xs),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: List.generate(5, (index) {
                           final value = index + 1;
 
                           return IconButton(
+                            tooltip: '$value star${value == 1 ? '' : 's'}',
+                            padding: const EdgeInsets.all(
+                              WorldCompanionSpacing.xxs,
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 44,
+                              minHeight: 44,
+                            ),
                             onPressed: () {
                               setSheetState(() {
                                 selectedRating = value;
@@ -516,70 +658,106 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                             icon: Icon(
                               value <= selectedRating
                                   ? Icons.star_rounded
-                                  : Icons
-                                      .star_outline_rounded,
-                              color:
-                                  const Color(0xFFF27C4A),
-                              size: 32,
+                                  : Icons.star_outline_rounded,
+                              color: WorldCompanionColors.warning,
+                              size: 31,
                             ),
                           );
-                        },
+                        }),
                       ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    TextField(
-                      controller: commentController,
-                      maxLines: 4,
-                      decoration: InputDecoration(
-                        hintText:
-                            'Share your experience...',
-                        filled: true,
-                        fillColor:
-                            const Color(0xFFF7F9F8),
-                        border: OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.circular(16),
-                          borderSide: BorderSide.none,
+                      if (selectedRating > 0) ...[
+                        const SizedBox(height: WorldCompanionSpacing.xxs),
+                        Text(
+                          _ratingLabel(selectedRating.toDouble()),
+                          style: WorldCompanionTypography
+                              .textTheme.labelMedium
+                              ?.copyWith(
+                            color: WorldCompanionColors.oceanBlue,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: WorldCompanionSpacing.lg),
+                      TextField(
+                        controller: commentController,
+                        maxLines: 4,
+                        maxLength: 1000,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: InputDecoration(
+                          hintText: 'Share your experience...',
+                          hintStyle:
+                              WorldCompanionTypography.textTheme.bodyMedium
+                                  ?.copyWith(
+                            color: WorldCompanionColors.mutedText,
+                          ),
+                          filled: true,
+                          fillColor: WorldCompanionColors.aiSurface,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              WorldCompanionRadius.medium,
+                            ),
+                            borderSide: const BorderSide(
+                              color: WorldCompanionColors.border,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              WorldCompanionRadius.medium,
+                            ),
+                            borderSide: const BorderSide(
+                              color: WorldCompanionColors.border,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              WorldCompanionRadius.medium,
+                            ),
+                            borderSide: const BorderSide(
+                              color: WorldCompanionColors.oceanBlue,
+                              width: 1.5,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: WorldCompanionSpacing.md),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: selectedRating == 0
+                              ? null
+                              : () async {
+                                  final rating = selectedRating;
+                                  final comment =
+                                      commentController.text.trim();
 
-                    const SizedBox(height: 18),
+                                  Navigator.pop(sheetContext);
 
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: selectedRating == 0
-                            ? null
-                            : () async {
-                                Navigator.pop(
-                                  sheetContext,
-                                );
-
-                                await _submitReview(
-                                  selectedRating,
-                                  commentController
-                                      .text
-                                      .trim(),
-                                );
-                              },
-                        child: const Text(
-                          'Submit review',
+                                  await _submitReview(rating, comment);
+                                },
+                          icon: const Icon(Icons.send_rounded, size: 18),
+                          label: const Text('Submit review'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: WorldCompanionColors.deepOcean,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              vertical: WorldCompanionSpacing.md,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                WorldCompanionRadius.medium,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             );
           },
         );
       },
-    ).whenComplete(
-      commentController.dispose,
-    );
+    ).whenComplete(commentController.dispose);
   }
 
   Future<void> _submitReview(
@@ -598,21 +776,17 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Review submitted successfully.',
-          ),
+          content: Text('Review submitted successfully.'),
         ),
       );
 
       await _loadReviews();
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Unable to submit the review.',
-          ),
+          content: Text('Unable to submit the review.'),
         ),
       );
     }

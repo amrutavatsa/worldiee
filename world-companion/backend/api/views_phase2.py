@@ -4,117 +4,897 @@ Place/routing/intent foundation.
 
 Endpoints:
   GET  /api/places/<id>/info/          — AI place & food info
-  GET  /api/places/nearby/             — nearby places discovery (filterable)
+  GET  /api/places/nearby/             — nearby places discovery
+  POST /api/routes/real-world/         — real-world road routing
   GET  /api/reviews/<target_type>/<target_id>/   — list reviews
   POST /api/reviews/                   — submit a review
   GET  /api/hotels/                    — search hotels
   POST /api/bookings/                  — simulated booking
-  GET  /api/bookings/<session>/        — booking history for a session
+  GET  /api/bookings/history/          — booking history
   POST /api/emergency-contacts/        — add emergency contact
-  GET  /api/emergency-contacts/<session>/  — list contacts
+  GET  /api/emergency-contacts/list/   — list contacts
   POST /api/sos/trigger/               — start SOS countdown
   POST /api/sos/<id>/activate/         — confirm SOS activation
   POST /api/sos/<id>/resolve/          — "I'm safe" — end SOS
   POST /api/itinerary/create/          — create a day-wise itinerary
+  GET  /api/itinerary/                 — list itineraries
   GET  /api/itinerary/<id>/            — fetch itinerary
   POST /api/preferences/               — save user preferences
-  GET  /api/recommendations/<session>/ — rule-based recommendations
+  GET  /api/recommendations/           — rule-based recommendations
 """
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
+
 import json
 import uuid
+
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from django.utils import timezone
 
 from api.models import (
-    Place, PlaceInfo, Hotel, Booking, Review,
-    EmergencyContact, SOSEvent, Itinerary, ItineraryStop, UserPreference,
+    Place,
+    PlaceInfo,
+    Hotel,
+    Booking,
+    Review,
+    EmergencyContact,
+    SOSEvent,
+    Itinerary,
+    ItineraryStop,
+    UserPreference,
 )
 
+from places.gateway import search_nearby
+from places.routing_provider import get_real_world_route
+from places.geoapify_provider import get_place_details
+from api.assistant.service import AssistantService
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _json_body(request):
     try:
         return json.loads(request.body), None
+
     except json.JSONDecodeError:
-        return None, JsonResponse({"error": "invalid JSON body"}, status=400)
+        return None, JsonResponse(
+            {"error": "invalid JSON body"},
+            status=400,
+        )
 
 
-# ---------- AI Place & Food Information ----------
+# ---------------------------------------------------------------------------
+# AI Place & Food Information
+# ---------------------------------------------------------------------------
 
 def place_info_view(request, place_id):
+    """
+    Return place information.
+
+    Supports two types of places:
+
+    1. WorldCompanion curated places stored in the local Place model.
+    2. Real-world Geoapify places returned by Nearby Search.
+
+    The local database is checked first.
+
+    If the place does not exist locally, the provider is queried
+    using the Geoapify place ID.
+    """
+
+    # -----------------------------------------------------------------------
+    # 1. Try WorldCompanion local place
+    # -----------------------------------------------------------------------
+
     try:
         place = Place.objects.get(id=place_id)
+
+        snippets = list(
+            place.info_snippets.values(
+                "topic",
+                "content",
+            )
+        )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "data": {
+                    "source": "worldcompanion",
+                    "place": place.name,
+                    "category": place.category,
+                    "info": snippets if snippets else [
+                        {
+                            "topic": "general",
+                            "content": (
+                                f"{place.name} is a "
+                                f"{place.category} in Bengaluru. "
+                                "More details coming soon."
+                            ),
+                        }
+                    ],
+                },
+            }
+        )
+
     except Place.DoesNotExist:
-        return JsonResponse({"error": "place not found"}, status=404)
+        pass
 
-    snippets = list(place.info_snippets.values("topic", "content"))
-    return JsonResponse({
-        "success": True,
-        "data": {
-            "place": place.name,
-            "category": place.category,
-            "info": snippets if snippets else [
-                {"topic": "general", "content": f"{place.name} is a {place.category} in Bengaluru. More details coming soon."}
-            ],
-        },
-    })
+    # -----------------------------------------------------------------------
+    # 2. Try real-world provider place
+    # -----------------------------------------------------------------------
 
+    try:
+        details = get_place_details(place_id)
 
-def nearby_places_view(request):
-    category = request.GET.get("category")
-    qs = Place.objects.all()
+    except Exception:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "place not found",
+            },
+            status=404,
+        )
+
+    if not details:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "place not found",
+            },
+            status=404,
+        )
+
+    # -----------------------------------------------------------------------
+    # Normalize provider response
+    # -----------------------------------------------------------------------
+
+    name = (
+        details.get("name")
+        or "Unknown place"
+    )
+
+    category = (
+        details.get("category")
+        or details.get("type")
+        or "place"
+    )
+
+    address = details.get(
+        "address",
+        "",
+    )
+
+    website = details.get(
+        "website",
+    )
+
+    phone = details.get(
+        "phone",
+    )
+
+    opening_hours = details.get(
+        "opening_hours",
+    )
+
+    rating = details.get(
+        "rating",
+    )
+
+    tags = details.get(
+        "tags",
+        {},
+    )
+
+    if not isinstance(tags, dict):
+        tags = {}
+
+    categories = tags.get(
+        "geoapify_categories",
+        [],
+    )
+
+    if not isinstance(categories, list):
+        categories = []
+
+    # -----------------------------------------------------------------------
+    # Build useful information blocks
+    # -----------------------------------------------------------------------
+
+    info = []
+
+    if address:
+        info.append(
+            {
+                "topic": "address",
+                "content": address,
+            }
+        )
+
     if category:
-        qs = qs.filter(category=category)
-    data = list(qs.values("id", "name", "category", "latitude", "longitude", "tags"))
-    return JsonResponse({"success": True, "data": data})
+        info.append(
+            {
+                "topic": "category",
+                "content": str(category).replace(
+                    "_",
+                    " ",
+                ),
+            }
+        )
+
+    if opening_hours:
+        info.append(
+            {
+                "topic": "opening_hours",
+                "content": str(opening_hours),
+            }
+        )
+
+    if rating is not None:
+        info.append(
+            {
+                "topic": "rating",
+                "content": (
+                    f"Provider rating: {rating}/5"
+                ),
+            }
+        )
+
+    if phone:
+        info.append(
+            {
+                "topic": "contact",
+                "content": str(phone),
+            }
+        )
+
+    if website:
+        info.append(
+            {
+                "topic": "website",
+                "content": str(website),
+            }
+        )
+
+    if categories:
+        readable_categories = []
+
+        for value in categories:
+            readable = str(value).replace(
+                ".",
+                " → ",
+            ).replace(
+                "_",
+                " ",
+            )
+
+            readable_categories.append(
+                readable
+            )
+
+        info.append(
+            {
+                "topic": "provider_categories",
+                "content": ", ".join(
+                    readable_categories
+                ),
+            }
+        )
+
+    # -----------------------------------------------------------------------
+    # General AI-ready context
+    #
+    # This is intentionally structured so the upcoming
+    # AI Place Intelligence milestone can consume it.
+    # -----------------------------------------------------------------------
+
+    general_content = (
+        f"{name} is a real-world place "
+        f"available through WorldCompanion's "
+        f"place discovery system."
+    )
+
+    if address:
+        general_content += (
+            f" It is located at {address}."
+        )
+
+    if category:
+        general_content += (
+            f" The place is categorized as "
+            f"{str(category).replace('_', ' ')}."
+        )
+
+    info.insert(
+        0,
+        {
+            "topic": "general",
+            "content": general_content,
+        },
+    )
+
+    # -----------------------------------------------------------------------
+    # Final response
+    # -----------------------------------------------------------------------
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "source": "geoapify",
+                "place": name,
+                "category": category,
+                "latitude": details.get(
+                    "latitude"
+                ),
+                "longitude": details.get(
+                    "longitude"
+                ),
+                "address": address,
+                "website": website,
+                "phone": phone,
+                "opening_hours": opening_hours,
+                "rating": rating,
+                "info": info,
+                "tags": tags,
+            },
+        }
+    )
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def place_ai_intelligence_view(request, place_id):
+    """
+    Generate grounded AI intelligence for a real-world place.
+    """
+
+    service = AssistantService(request.user)
+
+    result = service.generate_place_intelligence(
+        place_id=place_id,
+    )
+
+    status = 200 if result.get("success") else 400
+
+    return JsonResponse(
+        result,
+        status=status,
+    )
 
 
-# ---------- Reviews & Ratings ----------
+# ---------------------------------------------------------------------------
+# Nearby Places Discovery
+# ---------------------------------------------------------------------------
 
-def reviews_list_view(request, target_type, target_id):
-    reviews = Review.objects.filter(target_type=target_type, target_id=target_id)
-    avg = sum(r.rating for r in reviews) / reviews.count() if reviews.count() else None
-    data = [{"author": r.author_name, "rating": r.rating, "comment": r.comment,
-             "created_at": r.created_at.isoformat()} for r in reviews]
-    return JsonResponse({"success": True, "data": {"average_rating": avg, "count": reviews.count(), "reviews": data}})
+@csrf_exempt
+def nearby_places_view(request):
+    """
+    Return real-world places near a supplied GPS coordinate.
+
+    Query parameters:
+
+        lat       Required user latitude
+        lon       Required user longitude
+
+        radius    Optional radius in kilometres.
+                  Default: 10 km
+                  Minimum: 1 km
+                  Maximum: 15 km
+
+        category  Optional category filter.
+    """
+
+    if request.method != "GET":
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "GET required",
+            },
+            status=405,
+        )
+
+    # -----------------------------------------------------------------------
+    # Coordinates
+    # -----------------------------------------------------------------------
+
+    lat_raw = request.GET.get("lat")
+    lon_raw = request.GET.get("lon")
+
+    if lat_raw is None or lon_raw is None:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    "lat and lon are required. "
+                    "Example: "
+                    "/api/places/nearby/?lat=13.9380&lon=75.5499"
+                ),
+            },
+            status=400,
+        )
+
+    try:
+        user_lat = float(lat_raw)
+        user_lon = float(lon_raw)
+
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    "lat and lon must be valid numbers."
+                ),
+            },
+            status=400,
+        )
+
+    if not -90 <= user_lat <= 90:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "lat must be between -90 and 90.",
+            },
+            status=400,
+        )
+
+    if not -180 <= user_lon <= 180:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "lon must be between -180 and 180.",
+            },
+            status=400,
+        )
+
+    # -----------------------------------------------------------------------
+    # Radius
+    # -----------------------------------------------------------------------
+
+    radius_raw = request.GET.get(
+        "radius",
+        "10",
+    )
+
+    try:
+        radius_km = float(radius_raw)
+
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    "radius must be a valid number."
+                ),
+            },
+            status=400,
+        )
+
+    if radius_km < 1:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    "radius must be at least 1 km."
+                ),
+            },
+            status=400,
+        )
+
+    if radius_km > 15:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    "radius cannot be greater than 15 km."
+                ),
+            },
+            status=400,
+        )
+
+    # -----------------------------------------------------------------------
+    # Category
+    # -----------------------------------------------------------------------
+
+    category = request.GET.get(
+        "category"
+    )
+
+    if category == "":
+        category = None
+
+    # -----------------------------------------------------------------------
+    # Places Gateway
+    # -----------------------------------------------------------------------
+
+    try:
+        nearby = search_nearby(
+            latitude=user_lat,
+            longitude=user_lon,
+            radius_km=radius_km,
+            category=category,
+        )
+
+    except Exception as exc:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    "nearby places provider failed"
+                ),
+                "detail": str(exc),
+            },
+            status=502,
+        )
+
+    # -----------------------------------------------------------------------
+    # Response
+    # -----------------------------------------------------------------------
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": nearby,
+            "meta": {
+                "latitude": user_lat,
+                "longitude": user_lon,
+                "radius_km": radius_km,
+                "category": category,
+                "count": len(nearby),
+                "provider": "geoapify",
+            },
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Real-World Road Routing
+# ---------------------------------------------------------------------------
+
+@csrf_exempt
+def real_world_route_view(request):
+    """
+    Calculate a real road route between two geographic coordinates.
+
+    This endpoint is intentionally separate from the existing
+    /api/route/ A* routing endpoint.
+
+    Supported modes:
+
+        drive
+        motorcycle
+        scooter
+        bicycle
+        walk
+    """
+
+    if request.method != "POST":
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "POST required",
+            },
+            status=405,
+        )
+
+    body, err = _json_body(request)
+
+    if err:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "invalid JSON body",
+            },
+            status=400,
+        )
+
+    try:
+        start_lat = float(
+            body["start_lat"]
+        )
+
+        start_lon = float(
+            body["start_lon"]
+        )
+
+        destination_lat = float(
+            body["destination_lat"]
+        )
+
+        destination_lon = float(
+            body["destination_lon"]
+        )
+
+        mode = body.get(
+            "mode",
+            "drive",
+        )
+
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    "Expected start_lat, start_lon, "
+                    "destination_lat, destination_lon "
+                    "and optional mode."
+                ),
+                "detail": str(exc),
+            },
+            status=400,
+        )
+
+    # -----------------------------------------------------------------------
+    # Coordinate validation
+    # -----------------------------------------------------------------------
+
+    if not -90 <= start_lat <= 90:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Invalid start latitude.",
+            },
+            status=400,
+        )
+
+    if not -180 <= start_lon <= 180:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Invalid start longitude.",
+            },
+            status=400,
+        )
+
+    if not -90 <= destination_lat <= 90:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Invalid destination latitude.",
+            },
+            status=400,
+        )
+
+    if not -180 <= destination_lon <= 180:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Invalid destination longitude.",
+            },
+            status=400,
+        )
+
+    # -----------------------------------------------------------------------
+    # Routing provider
+    # -----------------------------------------------------------------------
+
+    try:
+        route = get_real_world_route(
+            start_lat=start_lat,
+            start_lon=start_lon,
+            destination_lat=destination_lat,
+            destination_lon=destination_lon,
+            mode=mode,
+        )
+
+    except ValueError as exc:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": str(exc),
+            },
+            status=400,
+        )
+
+    except Exception:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    "Unable to calculate the "
+                    "real-world route."
+                ),
+            },
+            status=502,
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": route,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reviews & Ratings
+# ---------------------------------------------------------------------------
+
+def reviews_list_view(
+    request,
+    target_type,
+    target_id,
+):
+    reviews = Review.objects.filter(
+        target_type=target_type,
+        target_id=target_id,
+    )
+
+    review_count = reviews.count()
+
+    avg = (
+        sum(
+            r.rating
+            for r in reviews
+        ) / review_count
+        if review_count
+        else None
+    )
+
+    data = [
+        {
+            "author": r.author_name,
+            "rating": r.rating,
+            "comment": r.comment,
+            "created_at": (
+                r.created_at.isoformat()
+            ),
+        }
+        for r in reviews
+    ]
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "average_rating": avg,
+                "count": review_count,
+                "reviews": data,
+            },
+        }
+    )
 
 
 @csrf_exempt
 def reviews_create_view(request):
     if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
+        return JsonResponse(
+            {"error": "POST required"},
+            status=405,
+        )
+
     body, err = _json_body(request)
+
     if err:
         return err
+
     try:
+        rating = int(
+            body["rating"]
+        )
+
+        if rating < 1 or rating > 5:
+            return JsonResponse(
+                {
+                    "error": (
+                        "rating must be between 1 and 5."
+                    )
+                },
+                status=400,
+            )
+
+        target_type = str(
+            body["target_type"]
+        ).strip()
+
+        target_id = str(
+            body["target_id"]
+        ).strip()
+
+        if not target_type or not target_id:
+            return JsonResponse(
+                {
+                    "error": (
+                        "target_type and target_id "
+                        "are required."
+                    )
+                },
+                status=400,
+            )
+
         review = Review.objects.create(
             id=uuid.uuid4(),
-            target_type=body["target_type"],
-            target_id=body["target_id"],
-            author_name=body.get("author_name", "Anonymous"),
-            rating=int(body["rating"]),
-            comment=body.get("comment", ""),
+            target_type=target_type,
+            target_id=target_id,
+            author_name=body.get(
+                "author_name",
+                "Anonymous",
+            ),
+            rating=rating,
+            comment=body.get(
+                "comment",
+                "",
+            ),
         )
-    except (KeyError, ValueError) as e:
-        return JsonResponse({"error": f"missing/invalid field: {e}"}, status=400)
-    return JsonResponse({"success": True, "data": {"id": str(review.id)}})
+
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return JsonResponse(
+            {
+                "error": (
+                    f"missing/invalid field: {exc}"
+                )
+            },
+            status=400,
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "id": str(review.id),
+                "target_type": review.target_type,
+                "target_id": review.target_id,
+                "author": review.author_name,
+                "rating": review.rating,
+                "comment": review.comment,
+                "created_at": (
+                    review.created_at.isoformat()
+                ),
+            },
+        },
+        status=201,
+    )
 
 
-# ---------- Hotels & Simulated Booking ----------
+# ---------------------------------------------------------------------------
+# Hotels & Simulated Booking
+# ---------------------------------------------------------------------------
 
 def hotels_search_view(request):
     area = request.GET.get("area")
     max_price = request.GET.get("max_price")
+
     qs = Hotel.objects.all()
+
     if area:
-        qs = qs.filter(area__icontains=area)
+        qs = qs.filter(
+            area__icontains=area
+        )
+
     if max_price:
-        qs = qs.filter(price_per_night__lte=max_price)
-    data = list(qs.values("id", "name", "area", "price_per_night", "rating", "facilities", "room_types"))
-    return JsonResponse({"success": True, "data": data})
+        qs = qs.filter(
+            price_per_night__lte=max_price
+        )
+
+    data = list(
+        qs.values(
+            "id",
+            "name",
+            "area",
+            "price_per_night",
+            "rating",
+            "facilities",
+            "room_types",
+        )
+    )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": data,
+        }
+    )
 
 
 @api_view(["POST"])
@@ -123,7 +903,9 @@ def booking_create_view(request):
     body = request.data
 
     try:
-        hotel = Hotel.objects.get(id=body["hotel_id"])
+        hotel = Hotel.objects.get(
+            id=body["hotel_id"]
+        )
 
         booking = Booking.objects.create(
             id=uuid.uuid4(),
@@ -137,28 +919,46 @@ def booking_create_view(request):
         )
 
     except Hotel.DoesNotExist:
-        return JsonResponse({"error": "hotel not found"}, status=404)
+        return JsonResponse(
+            {"error": "hotel not found"},
+            status=404,
+        )
 
-    except KeyError as e:
-        return JsonResponse({"error": f"missing field: {e}"}, status=400)
+    except KeyError as exc:
+        return JsonResponse(
+            {
+                "error": f"missing field: {exc}"
+            },
+            status=400,
+        )
 
-    return JsonResponse({
-        "success": True,
-        "data": {
-            "booking_id": str(booking.id),
-            "status": booking.status,
-            "hotel": hotel.name,
-            "note": "This is a simulated booking — no payment was processed.",
-        }
-    }, status=201)
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "booking_id": str(
+                    booking.id
+                ),
+                "status": booking.status,
+                "hotel": hotel.name,
+                "note": (
+                    "This is a simulated booking — "
+                    "no payment was processed."
+                ),
+            },
+        },
+        status=201,
+    )
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def booking_history_view(request):
-    bookings = Booking.objects.filter(
-        user=request.user
-    ).select_related("hotel")
+    bookings = (
+        Booking.objects
+        .filter(user=request.user)
+        .select_related("hotel")
+    )
 
     data = [
         {
@@ -172,12 +972,17 @@ def booking_history_view(request):
         for b in bookings
     ]
 
-    return JsonResponse({
-        "success": True,
-        "data": data,
-    })
+    return JsonResponse(
+        {
+            "success": True,
+            "data": data,
+        }
+    )
 
-# ---------- Emergency Contacts & SOS ----------
+
+# ---------------------------------------------------------------------------
+# Emergency Contacts & SOS
+# ---------------------------------------------------------------------------
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -190,11 +995,17 @@ def emergency_contact_create_view(request):
             user=request.user,
             name=body["name"],
             phone=body["phone"],
-            relationship=body.get("relationship", ""),
+            relationship=body.get(
+                "relationship",
+                "",
+            ),
         )
-    except KeyError as e:
+
+    except KeyError as exc:
         return JsonResponse(
-            {"error": f"missing field: {e}"},
+            {
+                "error": f"missing field: {exc}"
+            },
             status=400,
         )
 
@@ -202,7 +1013,9 @@ def emergency_contact_create_view(request):
         {
             "success": True,
             "data": {
-                "id": str(contact.id),
+                "id": str(
+                    contact.id
+                ),
             },
         }
     )
@@ -242,8 +1055,12 @@ def sos_trigger_view(request):
         id=uuid.uuid4(),
         user=request.user,
         status="countdown",
-        latitude=body.get("latitude"),
-        longitude=body.get("longitude"),
+        latitude=body.get(
+            "latitude"
+        ),
+        longitude=body.get(
+            "longitude"
+        ),
     )
 
     return JsonResponse(
@@ -256,18 +1073,61 @@ def sos_trigger_view(request):
         }
     )
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def sos_active_view(request):
+    """
+    Return the user's current active SOS event, if one exists.
+    """
+
+    event = (
+        SOSEvent.objects
+        .filter(
+            user=request.user,
+            status__in=["countdown", "active"],
+        )
+        .order_by("-triggered_at")
+        .first()
+    )
+
+    if event is None:
+        return JsonResponse(
+            {
+                "success": True,
+                "data": None,
+            }
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "id": str(event.id),
+                "status": event.status,
+                "latitude": event.latitude,
+                "longitude": event.longitude,
+                "created_at": event.triggered_at.isoformat(),
+            },
+        }
+    )
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def sos_activate_view(request, event_id):
+def sos_activate_view(
+    request,
+    event_id,
+):
     try:
         event = SOSEvent.objects.get(
             id=event_id,
             user=request.user,
         )
+
     except SOSEvent.DoesNotExist:
         return JsonResponse(
-            {"error": "SOS event not found"},
+            {
+                "error": "SOS event not found"
+            },
             status=404,
         )
 
@@ -276,19 +1136,30 @@ def sos_activate_view(request, event_id):
     )
 
     event.status = "active"
-    event.notified_contacts = [str(c.id) for c in contacts]
+
+    event.notified_contacts = [
+        str(c.id)
+        for c in contacts
+    ]
+
     event.save()
 
     return JsonResponse(
         {
             "success": True,
             "data": {
-                "id": str(event.id),
+                "id": str(
+                    event.id
+                ),
                 "status": event.status,
-                "notified": [c.name for c in contacts],
+                "notified": [
+                    c.name
+                    for c in contacts
+                ],
                 "note": (
-                    "Simulated notification — no real SMS/call "
-                    "was sent in this phase."
+                    "Simulated notification — "
+                    "no real SMS/call was sent "
+                    "in this phase."
                 ),
             },
         }
@@ -297,15 +1168,21 @@ def sos_activate_view(request, event_id):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def sos_resolve_view(request, event_id):
+def sos_resolve_view(
+    request,
+    event_id,
+):
     try:
         event = SOSEvent.objects.get(
             id=event_id,
             user=request.user,
         )
+
     except SOSEvent.DoesNotExist:
         return JsonResponse(
-            {"error": "SOS event not found"},
+            {
+                "error": "SOS event not found"
+            },
             status=404,
         )
 
@@ -317,19 +1194,25 @@ def sos_resolve_view(request, event_id):
         {
             "success": True,
             "data": {
-                "id": str(event.id),
+                "id": str(
+                    event.id
+                ),
                 "status": event.status,
             },
         }
     )
 
-# ---------- Smart Itinerary Planning ----------
+
+# ---------------------------------------------------------------------------
+# Smart Itinerary Planning
+# ---------------------------------------------------------------------------
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def itinerary_create_view(request):
     """
     Body:
+
     {
         "title": "My Trip",
         "stops": [
@@ -342,82 +1225,130 @@ def itinerary_create_view(request):
         ]
     }
     """
+
     body = request.data
 
     itinerary = Itinerary.objects.create(
         id=uuid.uuid4(),
         user=request.user,
-        title=body.get("title", "My Trip"),
+        title=body.get(
+            "title",
+            "My Trip",
+        ),
     )
 
-    for i, stop in enumerate(body.get("stops", [])):
+    for i, stop in enumerate(
+        body.get("stops", [])
+    ):
         try:
-            place = Place.objects.get(id=stop["place_id"])
-        except (Place.DoesNotExist, KeyError):
+            place = Place.objects.get(
+                id=stop["place_id"]
+            )
+
+        except (
+            Place.DoesNotExist,
+            KeyError,
+        ):
             continue
 
         ItineraryStop.objects.create(
             itinerary=itinerary,
-            day_number=stop.get("day_number", 1),
+            day_number=stop.get(
+                "day_number",
+                1,
+            ),
             order=i,
             place=place,
-            scheduled_time=stop.get("scheduled_time", ""),
-            notes=stop.get("notes", ""),
+            scheduled_time=stop.get(
+                "scheduled_time",
+                "",
+            ),
+            notes=stop.get(
+                "notes",
+                "",
+            ),
         )
 
     return JsonResponse(
         {
             "success": True,
             "data": {
-                "id": str(itinerary.id),
+                "id": str(
+                    itinerary.id
+                ),
             },
         },
         status=201,
     )
 
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def itinerary_list_view(request):
-    itineraries = request.user.itineraries.order_by("-created_at")
+    itineraries = (
+        request.user.itineraries
+        .order_by("-created_at")
+    )
 
     return JsonResponse(
         {
             "success": True,
             "data": [
                 {
-                    "id": str(itinerary.id),
+                    "id": str(
+                        itinerary.id
+                    ),
                     "title": itinerary.title,
-                    "created_at": itinerary.created_at.isoformat(),
+                    "created_at": (
+                        itinerary.created_at
+                        .isoformat()
+                    ),
                 }
                 for itinerary in itineraries
             ],
         }
     )
 
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
-def itinerary_detail_view(request, itinerary_id):
+def itinerary_detail_view(
+    request,
+    itinerary_id,
+):
     try:
         itinerary = Itinerary.objects.get(
             id=itinerary_id,
             user=request.user,
         )
+
     except Itinerary.DoesNotExist:
         return JsonResponse(
-            {"error": "itinerary not found"},
+            {
+                "error": "itinerary not found"
+            },
             status=404,
         )
 
-    stops = itinerary.stops.select_related("place").all()
+    stops = (
+        itinerary.stops
+        .select_related("place")
+        .all()
+    )
 
     days = {}
 
-    for s in stops:
-        days.setdefault(s.day_number, []).append(
+    for stop in stops:
+        days.setdefault(
+            stop.day_number,
+            [],
+        ).append(
             {
-                "place": s.place.name,
-                "scheduled_time": s.scheduled_time,
-                "notes": s.notes,
+                "place": stop.place.name,
+                "scheduled_time": (
+                    stop.scheduled_time
+                ),
+                "notes": stop.notes,
             }
         )
 
@@ -425,21 +1356,27 @@ def itinerary_detail_view(request, itinerary_id):
         {
             "success": True,
             "data": {
-                "id": str(itinerary.id),
+                "id": str(
+                    itinerary.id
+                ),
                 "title": itinerary.title,
                 "days": days,
             },
         }
     )
 
-# ---------- Preferences & Rule-Based Recommendations ----------
+
+# ---------------------------------------------------------------------------
+# Preferences & Rule-Based Recommendations
+# ---------------------------------------------------------------------------
 
 @csrf_exempt
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def preferences_save_view(request):
     """
-    Save or update travel preferences for the authenticated user.
+    Save or update travel preferences for
+    the authenticated user.
     """
 
     body = request.data
@@ -447,9 +1384,18 @@ def preferences_save_view(request):
     pref, _ = UserPreference.objects.update_or_create(
         user=request.user,
         defaults={
-            "interests": body.get("interests", []),
-            "budget": body.get("budget", "mid-range"),
-            "travel_style": body.get("travel_style", ""),
+            "interests": body.get(
+                "interests",
+                [],
+            ),
+            "budget": body.get(
+                "budget",
+                "mid-range",
+            ),
+            "travel_style": body.get(
+                "travel_style",
+                "",
+            ),
         },
     )
 
@@ -458,10 +1404,14 @@ def preferences_save_view(request):
             "success": True,
             "data": {
                 "user_id": request.user.id,
-                "username": request.user.username,
+                "username": (
+                    request.user.username
+                ),
                 "interests": pref.interests,
                 "budget": pref.budget,
-                "travel_style": pref.travel_style,
+                "travel_style": (
+                    pref.travel_style
+                ),
             },
         }
     )
@@ -471,50 +1421,64 @@ def preferences_save_view(request):
 @permission_classes([IsAuthenticated])
 def recommendations_view(request):
     """
-    Rule-based recommendation: score each Place by tag overlap with the
+    Rule-based recommendation.
+
+    Score each local Place by tag overlap with the
     authenticated user's stated interests.
 
     This is intentionally NOT collaborative filtering.
-    Real collaborative filtering requires interaction data that this
-    phase does not have yet.
     """
 
     try:
-        pref = UserPreference.objects.get(user=request.user)
+        pref = UserPreference.objects.get(
+            user=request.user
+        )
 
     except UserPreference.DoesNotExist:
         return JsonResponse(
             {
                 "success": True,
                 "data": [],
-                "note": "No preferences saved yet for this user.",
+                "note": (
+                    "No preferences saved yet "
+                    "for this user."
+                ),
             }
         )
 
-    interests = set(pref.interests)
+    interests = set(
+        pref.interests
+    )
 
     scored = []
 
     for place in Place.objects.all():
         overlap = len(
-            interests.intersection(set(place.tags))
+            interests.intersection(
+                set(place.tags)
+            )
         )
 
-        scored.append((overlap, place))
+        scored.append(
+            (
+                overlap,
+                place,
+            )
+        )
 
     scored.sort(
-        key=lambda x: x[0],
-        reverse=True
+        key=lambda item: item[0],
+        reverse=True,
     )
 
     top = [
         {
-            "id": p.id,
-            "name": p.name,
-            "category": p.category,
+            "id": place.id,
+            "name": place.name,
+            "category": place.category,
             "match_score": score,
         }
-        for score, p in scored[:5]
+        for score, place in scored[:5]
     ]
 
     return JsonResponse(

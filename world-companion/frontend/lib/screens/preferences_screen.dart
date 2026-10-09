@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
+import '../theme/world_companion_colors.dart';
+import '../theme/world_companion_elevation.dart';
+import '../theme/world_companion_motion.dart';
+import '../theme/world_companion_radius.dart';
+import '../theme/world_companion_spacing.dart';
+import '../theme/world_companion_typography.dart';
 
 class PreferencesScreen extends StatefulWidget {
   const PreferencesScreen({super.key});
@@ -10,16 +16,6 @@ class PreferencesScreen extends StatefulWidget {
 }
 
 class _PreferencesScreenState extends State<PreferencesScreen> {
-  static const Color primary = Color(0xFF0E7774);
-  static const Color deep = Color(0xFF123B43);
-  static const Color aqua = Color(0xFFDFF4F1);
-  static const Color background = Color(0xFFF7F9F8);
-  static const Color surface = Color(0xFFFFFFFF);
-  static const Color ink = Color(0xFF172326);
-  static const Color muted = Color(0xFF68777B);
-  static const Color line = Color(0xFFDCE5E4);
-  static const Color error = Color(0xFFC94B4B);
-
   final List<String> _interestOptions = [
     'Food',
     'Nature',
@@ -83,10 +79,8 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: error,
-          content: Text(
-            'Could not save preferences: $e',
-          ),
+          backgroundColor: WorldCompanionColors.error,
+          content: Text('Could not save preferences: $e'),
         ),
       );
     } finally {
@@ -98,29 +92,20 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
     }
   }
 
-  Widget _sectionTitle(
-    String title,
-    String subtitle,
-  ) {
+  Widget _sectionTitle(String title, String subtitle) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: const TextStyle(
-            color: ink,
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-          ),
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: WorldCompanionColors.primaryText,
+              ),
         ),
-        const SizedBox(height: 5),
+        const SizedBox(height: WorldCompanionSpacing.xxs),
         Text(
           subtitle,
-          style: const TextStyle(
-            color: muted,
-            fontSize: 13,
-            height: 1.4,
-          ),
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
       ],
     );
@@ -132,75 +117,94 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
     return FilterChip(
       label: Text(interest),
       selected: selected,
-      onSelected: (value) {
-        setState(() {
-          if (value) {
-            _selectedInterests.add(interest);
-          } else {
-            _selectedInterests.remove(interest);
-          }
-        });
-      },
-      selectedColor: aqua,
-      checkmarkColor: primary,
-      backgroundColor: surface,
+      onSelected: _saving
+          ? null
+          : (value) {
+              setState(() {
+                if (value) {
+                  _selectedInterests.add(interest);
+                } else {
+                  _selectedInterests.remove(interest);
+                }
+              });
+            },
+      selectedColor: WorldCompanionColors.infoSurface,
+      checkmarkColor: WorldCompanionColors.oceanBlue,
+      backgroundColor: WorldCompanionColors.surface,
       side: BorderSide(
-        color: selected ? primary : line,
+        color: selected
+            ? WorldCompanionColors.oceanBlue
+            : WorldCompanionColors.border,
       ),
-      labelStyle: TextStyle(
-        color: selected ? primary : ink,
-        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-      ),
+      labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: selected
+                ? WorldCompanionColors.oceanBlue
+                : WorldCompanionColors.primaryText,
+          ),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.medium),
       ),
+      showCheckmark: true,
     );
   }
 
   Widget _selectionCard({
     required String value,
     required String selectedValue,
+    required IconData icon,
     required VoidCallback onTap,
   }) {
     final selected = value == selectedValue;
 
-    return Expanded(
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: value,
       child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        onTap: _saving ? null : onTap,
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: WorldCompanionMotion.standard,
+          curve: WorldCompanionMotion.standardCurve,
+          width: double.infinity,
           padding: const EdgeInsets.symmetric(
-            vertical: 16,
-            horizontal: 12,
+            vertical: WorldCompanionSpacing.md,
+            horizontal: WorldCompanionSpacing.xs,
           ),
           decoration: BoxDecoration(
-            color: selected ? aqua : surface,
-            borderRadius: BorderRadius.circular(16),
+            color: selected
+                ? WorldCompanionColors.infoSurface
+                : WorldCompanionColors.surface,
+            borderRadius:
+                BorderRadius.circular(WorldCompanionRadius.large),
             border: Border.all(
-              color: selected ? primary : line,
+              color: selected
+                  ? WorldCompanionColors.oceanBlue
+                  : WorldCompanionColors.border,
               width: selected ? 1.5 : 1,
             ),
           ),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                selected
-                    ? Icons.check_circle_rounded
-                    : Icons.circle_outlined,
-                color: selected ? primary : muted,
-                size: 22,
+                selected ? Icons.check_circle_rounded : icon,
+                color: selected
+                    ? WorldCompanionColors.oceanBlue
+                    : WorldCompanionColors.mutedText,
+                size: 23,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: WorldCompanionSpacing.xs),
               Text(
                 value,
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: selected ? primary : ink,
-                  fontSize: 13,
-                  fontWeight:
-                      selected ? FontWeight.w700 : FontWeight.w500,
-                ),
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: selected
+                          ? WorldCompanionColors.oceanBlue
+                          : WorldCompanionColors.primaryText,
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w600,
+                    ),
               ),
             ],
           ),
@@ -209,21 +213,19 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
     );
   }
 
-  Widget _sectionCard({
-    required Widget child,
-  }) {
+  Widget _sectionCard({required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.md),
       decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: line),
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.extraLarge),
+        border: Border.all(color: WorldCompanionColors.border),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x08123B43),
-            blurRadius: 14,
-            offset: Offset(0, 6),
+            color: Color(0x080B2545),
+            blurRadius: 16,
+            offset: Offset(0, 5),
           ),
         ],
       ),
@@ -231,169 +233,228 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
     );
   }
 
+  Widget _buildOptionRow({
+    required List<String> options,
+    required String selectedValue,
+    required IconData Function(String value) iconFor,
+    required ValueChanged<String> onSelected,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        for (int i = 0; i < options.length; i++) ...[
+          if (i > 0)
+            const SizedBox(width: WorldCompanionSpacing.xs),
+          Expanded(
+            child: _selectionCard(
+              value: options[i],
+              selectedValue: selectedValue,
+              icon: iconFor(options[i]),
+              onTap: () => onSelected(options[i]),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: WorldCompanionColors.mapSurface,
       appBar: AppBar(
-        title: const Text('Preferences'),
-        backgroundColor: background,
-        foregroundColor: ink,
-        elevation: 0,
+        title: Text(
+          'Travel preferences',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        backgroundColor: WorldCompanionColors.mapSurface,
+        foregroundColor: WorldCompanionColors.primaryText,
+        elevation: WorldCompanionElevation.none,
+        scrolledUnderElevation: WorldCompanionElevation.none,
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          padding: const EdgeInsets.fromLTRB(
+            WorldCompanionSpacing.mobilePage,
+            WorldCompanionSpacing.xs,
+            WorldCompanionSpacing.mobilePage,
+            WorldCompanionSpacing.xxxl,
+          ),
           children: [
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   colors: [
-                    deep,
-                    primary,
+                    WorldCompanionColors.deepOcean,
+                    WorldCompanionColors.oceanBlue,
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.circular(24),
+                borderRadius:
+                    BorderRadius.circular(WorldCompanionRadius.extraLarge),
               ),
-              child: const Column(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.tune_rounded,
-                    color: Colors.white,
-                    size: 30,
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.12),
+                      borderRadius:
+                          BorderRadius.circular(WorldCompanionRadius.medium),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.18),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.tune_rounded,
+                      color: Colors.white,
+                      size: 27,
+                    ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: WorldCompanionSpacing.lg),
                   Text(
                     'Shape your journey',
-                    style: TextStyle(
+                    style: WorldCompanionTypography.editorial.copyWith(
                       color: Colors.white,
-                      fontSize: 23,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 30,
+                      height: 1.2,
                     ),
                   ),
-                  SizedBox(height: 6),
+                  const SizedBox(height: WorldCompanionSpacing.xs),
                   Text(
-                    'Tell WorldCompanion what kind of travel experience you prefer.',
-                    style: TextStyle(
-                      color: Color(0xD9FFFFFF),
-                      fontSize: 13,
-                      height: 1.5,
-                    ),
+                    'Tell WorldCompanion what you enjoy, '
+                    'how you travel, and what fits your budget.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.white.withOpacity(0.85),
+                          height: 1.6,
+                        ),
                   ),
                 ],
               ),
             ),
-
-            const SizedBox(height: 28),
-
+            const SizedBox(height: WorldCompanionSpacing.xl),
             _sectionTitle(
-              'Interests',
-              'Choose the things you enjoy exploring.',
+              'Your interests',
+              'Choose the experiences you would like to discover.',
             ),
-
-            const SizedBox(height: 14),
-
+            const SizedBox(height: WorldCompanionSpacing.md),
             _sectionCard(
               child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _interestOptions
-                    .map(_interestChip)
-                    .toList(),
+                spacing: WorldCompanionSpacing.xs,
+                runSpacing: WorldCompanionSpacing.xs,
+                children: _interestOptions.map(_interestChip).toList(),
               ),
             ),
-
-            const SizedBox(height: 28),
-
+            const SizedBox(height: WorldCompanionSpacing.xl),
             _sectionTitle(
-              'Budget',
-              'Choose the spending level that fits your trip.',
+              'Your budget',
+              'Choose a spending level that suits your trip.',
             ),
-
-            const SizedBox(height: 14),
-
-            Row(
-              children: _budgetOptions.map((option) {
-                return Padding(
-                  padding: EdgeInsets.only(
-                    right: option == _budgetOptions.last ? 0 : 8,
-                  ),
-                  child: _selectionCard(
-                    value: option,
-                    selectedValue: _selectedBudget,
-                    onTap: () {
-                      setState(() {
-                        _selectedBudget = option;
-                      });
-                    },
-                  ),
-                );
-              }).toList(),
+            const SizedBox(height: WorldCompanionSpacing.md),
+            _sectionCard(
+              child: _buildOptionRow(
+                options: _budgetOptions,
+                selectedValue: _selectedBudget,
+                iconFor: (value) {
+                  switch (value) {
+                    case 'Budget':
+                      return Icons.savings_outlined;
+                    case 'Premium':
+                      return Icons.diamond_outlined;
+                    default:
+                      return Icons.account_balance_wallet_outlined;
+                  }
+                },
+                onSelected: (value) {
+                  setState(() {
+                    _selectedBudget = value;
+                  });
+                },
+              ),
             ),
-
-            const SizedBox(height: 28),
-
+            const SizedBox(height: WorldCompanionSpacing.xl),
             _sectionTitle(
               'Travel style',
-              'Choose how you like to experience a destination.',
+              'Choose the pace that feels right for you.',
             ),
-
-            const SizedBox(height: 14),
-
-            Row(
-              children: _travelStyleOptions.map((option) {
-                return Padding(
-                  padding: EdgeInsets.only(
-                    right: option == _travelStyleOptions.last ? 0 : 8,
-                  ),
-                  child: _selectionCard(
-                    value: option,
-                    selectedValue: _selectedTravelStyle,
-                    onTap: () {
-                      setState(() {
-                        _selectedTravelStyle = option;
-                      });
-                    },
-                  ),
-                );
-              }).toList(),
+            const SizedBox(height: WorldCompanionSpacing.md),
+            _sectionCard(
+              child: _buildOptionRow(
+                options: _travelStyleOptions,
+                selectedValue: _selectedTravelStyle,
+                iconFor: (value) {
+                  switch (value) {
+                    case 'Relaxed':
+                      return Icons.spa_outlined;
+                    case 'Adventure':
+                      return Icons.hiking_outlined;
+                    default:
+                      return Icons.explore_outlined;
+                  }
+                },
+                onSelected: (value) {
+                  setState(() {
+                    _selectedTravelStyle = value;
+                  });
+                },
+              ),
             ),
-
-            const SizedBox(height: 32),
-
+            const SizedBox(height: WorldCompanionSpacing.xl),
             SizedBox(
               height: 54,
               child: ElevatedButton(
                 onPressed: _saving ? null : _savePreferences,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: primary,
+                  backgroundColor: WorldCompanionColors.deepOcean,
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor: primary.withOpacity(0.45),
+                  disabledBackgroundColor:
+                      WorldCompanionColors.deepOcean.withOpacity(0.45),
+                  disabledForegroundColor: Colors.white70,
+                  elevation: WorldCompanionElevation.none,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius:
+                        BorderRadius.circular(WorldCompanionRadius.large),
                   ),
                 ),
-                child: _saving
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: Colors.white,
+                child: AnimatedSwitcher(
+                  duration: WorldCompanionMotion.fast,
+                  child: _saving
+                      ? const SizedBox(
+                          key: ValueKey('saving'),
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Row(
+                          key: const ValueKey('save'),
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.check_rounded, size: 20),
+                            const SizedBox(width: WorldCompanionSpacing.xs),
+                            Text(
+                              'Save preferences',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelLarge
+                                  ?.copyWith(color: Colors.white),
+                            ),
+                          ],
                         ),
-                      )
-                    : const Text(
-                        'Save Preferences',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                ),
               ),
+            ),
+            const SizedBox(height: WorldCompanionSpacing.sm),
+            Text(
+              'Your choices help personalize your travel suggestions.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ),

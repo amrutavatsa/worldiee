@@ -1,10 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../services/api_service.dart';
-import 'route_screen.dart';
+import 'companion_screen.dart';
 import 'explore_screens.dart';
+import 'nearby_screen.dart';
 import 'place_details_screen.dart';
 import 'profile_screen.dart';
+import 'route_screen.dart';
+import 'stays_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,500 +22,1064 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _controller = TextEditingController();
+  final stt.SpeechToText _speech = stt.SpeechToText();
 
-  Map<String, dynamic>? _lastIntent;
-  bool _loading = false;
-  String? _error;
+  static const Duration _silenceDuration = Duration(seconds: 3);
 
-  Map<String, dynamic> _pois = {};
-  bool _poisLoading = true;
-  String? _poisError;
+  bool _speechAvailable = false;
+  bool _isListening = false;
+  bool _voiceSubmitting = false;
 
-  static const Color primary = Color(0xFF0E7774);
-  static const Color deep = Color(0xFF123B43);
-  static const Color accent = Color(0xFFF27C4A);
-  static const Color aqua = Color(0xFFDFF4F1);
-  static const Color background = Color(0xFFF7F9F8);
-  static const Color surface = Color(0xFFFFFFFF);
-  static const Color ink = Color(0xFF172326);
-  static const Color muted = Color(0xFF68777B);
-  static const Color line = Color(0xFFDCE5E4);
+  bool _nearbyLoading = true;
+  String? _nearbyError;
+  List<Map<String, dynamic>> _nearbyPlaces = [];
+
+  bool _recommendationsLoading = true;
+  List<Map<String, dynamic>> _recommendations = [];
+
+  Timer? _speechSilenceTimer;
+
+  static const List<Map<String, String>> _destinations = [
+    {
+      'name': 'Coorg',
+      'subtitle': 'Coffee trails & green hills',
+      'image':
+          'https://images.unsplash.com/photo-1511497584788-876760111969?w=900&auto=format&fit=crop&q=85',
+    },
+    {
+      'name': 'Hampi',
+      'subtitle': 'Ancient ruins & heritage',
+      'image':
+          'https://images.unsplash.com/photo-1600100397608-f0109a6c0d4a?w=900&auto=format&fit=crop&q=85',
+    },
+    {
+      'name': 'Goa',
+      'subtitle': 'Coastal escapes',
+      'image':
+          'https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=900&auto=format&fit=crop&q=85',
+    },
+    {
+      'name': 'Mysuru',
+      'subtitle': 'Palaces & local culture',
+      'image':
+          'https://images.unsplash.com/photo-1566552881560-0be862a7c445?w=900&auto=format&fit=crop&q=85',
+    },
+  ];
 
   @override
   void initState() {
     super.initState();
-    _loadPois();
-  }
-
-  Future<void> _loadPois() async {
-    try {
-      final data = await ApiService.getPois();
-
-      if (!mounted) return;
-
-      setState(() {
-        _pois = data;
-        _poisLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _poisLoading = false;
-        _poisError = e.toString();
-      });
-    }
+    _initializeSpeech();
+    _loadNearbyPlaces();
+    _loadRecommendations();
   }
 
   @override
   void dispose() {
+    _speechSilenceTimer?.cancel();
+    _speech.stop();
     _controller.dispose();
     super.dispose();
   }
 
-  Future<void> _submitQuery(String text) async {
-    if (text.trim().isEmpty || _loading) return;
+  // ---------------------------------------------------------------------------
+  // Speech input
+  // ---------------------------------------------------------------------------
 
-    FocusScope.of(context).unfocus();
-
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
+  Future<void> _initializeSpeech() async {
     try {
-      final intent = await ApiService.classifyIntent(text);
+      final available = await _speech.initialize(
+        onStatus: (status) {
+          if (!mounted) return;
+
+          final listening = status == 'listening';
+
+          setState(() {
+            _isListening = listening;
+          });
+
+          if (!listening) {
+            _cancelSilenceTimer();
+          }
+        },
+        onError: (_) {
+          if (!mounted) return;
+
+          setState(() {
+            _isListening = false;
+            _voiceSubmitting = false;
+          });
+
+          _cancelSilenceTimer();
+        },
+      );
 
       if (!mounted) return;
 
       setState(() {
-        _lastIntent = intent;
+        _speechAvailable = available;
       });
-
-      if (intent["intent"] == "navigation") {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const RouteScreen(),
-          ),
-        );
-      }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
 
       setState(() {
-        _error = e.toString();
+        _speechAvailable = false;
       });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
     }
   }
 
-  void _showVoiceUnavailable() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: deep,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+  void _resetSilenceTimer() {
+    _speechSilenceTimer?.cancel();
+    _speechSilenceTimer = Timer(
+      _silenceDuration,
+      _handleSpeechSilence,
+    );
+  }
+
+  void _cancelSilenceTimer() {
+    _speechSilenceTimer?.cancel();
+    _speechSilenceTimer = null;
+  }
+
+  Future<void> _handleSpeechSilence() async {
+    if (!mounted || !_isListening || _voiceSubmitting) return;
+
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+
+    setState(() {
+      _voiceSubmitting = true;
+    });
+
+    _cancelSilenceTimer();
+
+    try {
+      await _speech.stop();
+
+      if (!mounted) return;
+
+      setState(() {
+        _isListening = false;
+      });
+
+      await Future<void>.delayed(
+        const Duration(milliseconds: 250),
+      );
+
+      if (!mounted) return;
+
+      final recognizedText = _controller.text.trim();
+
+      setState(() {
+        _voiceSubmitting = false;
+      });
+
+      if (recognizedText.isNotEmpty) {
+        _openCompanion(initialMessage: recognizedText);
+      }
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _isListening = false;
+        _voiceSubmitting = false;
+      });
+
+      _showMessage('Could not finish voice input. Please try again.');
+    }
+  }
+
+  Future<void> _toggleListening() async {
+    if (_isListening) {
+      _cancelSilenceTimer();
+
+      final text = _controller.text.trim();
+
+      try {
+        await _speech.stop();
+      } catch (_) {
+        // Continue with recognized text if stopping fails.
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _isListening = false;
+      });
+
+      if (text.isNotEmpty) {
+        _openCompanion(initialMessage: text);
+      }
+
+      return;
+    }
+
+    if (_voiceSubmitting) return;
+
+    if (!_speechAvailable) {
+      await _initializeSpeech();
+    }
+
+    if (!_speechAvailable || !mounted) {
+      _showMessage(
+        'Voice input is unavailable. Please type your question.',
+      );
+      return;
+    }
+
+    _controller.clear();
+
+    try {
+      await _speech.listen(
+        listenOptions: stt.SpeechListenOptions(
+          localeId: 'en_IN',
+          listenMode: stt.ListenMode.confirmation,
+          partialResults: true,
         ),
-        content: const Row(
-          children: [
-            Icon(
-              Icons.mic_none_rounded,
-              color: Colors.white,
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Voice capture is not connected yet. You can type your request for now.',
-              ),
-            ),
-          ],
+        onResult: (result) {
+          if (!mounted) return;
+
+          setState(() {
+            _controller.text = result.recognizedWords;
+            _controller.selection = TextSelection.collapsed(
+              offset: _controller.text.length,
+            );
+          });
+
+          if (result.recognizedWords.trim().isNotEmpty) {
+            _resetSilenceTimer();
+          }
+
+          if (result.finalResult) {
+            _resetSilenceTimer();
+          }
+        },
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _isListening = true;
+      });
+
+      _resetSilenceTimer();
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _isListening = false;
+        _voiceSubmitting = false;
+      });
+
+      _cancelSilenceTimer();
+      _showMessage('Could not start voice input. Please try again.');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dedicated Companion navigation
+  // ---------------------------------------------------------------------------
+
+  void _openCompanion({String? initialMessage}) {
+    final message = initialMessage?.trim();
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CompanionScreen(
+          initialMessage:
+              message != null && message.isNotEmpty ? message : null,
         ),
       ),
     );
   }
 
+  void _showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
+
   // ---------------------------------------------------------------------------
-  // Bottom navigation
+  // Nearby places
   // ---------------------------------------------------------------------------
 
+  Future<void> _loadNearbyPlaces() async {
+    if (!mounted) return;
+
+    setState(() {
+      _nearbyLoading = true;
+      _nearbyError = null;
+    });
+
+    try {
+      final serviceEnabled =
+          await Geolocator.isLocationServiceEnabled();
+
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled.');
+      }
+
+      var permission = await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied) {
+        throw Exception('Location permission was denied.');
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission is permanently denied.');
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw Exception('Location request timed out.');
+        },
+      );
+
+      final result = await ApiService.getNearbyPlaces(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        radiusKm: 10,
+      );
+
+      if (!mounted) return;
+
+      final parsedPlaces = result
+          .whereType<Map>()
+          .map((place) => Map<String, dynamic>.from(place))
+          .toList();
+
+      setState(() {
+        _nearbyPlaces = parsedPlaces;
+        _nearbyLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      final message = error.toString().toLowerCase();
+
+      setState(() {
+        _nearbyLoading = false;
+        _nearbyError = message.contains('permission')
+            ? 'Allow location access to discover places around you.'
+            : message.contains('disabled')
+                ? 'Enable location services and try again.'
+                : message.contains('timed out')
+                    ? 'Location took too long to respond.'
+                    : 'Nearby places could not be loaded right now.';
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Recommendations
+  // ---------------------------------------------------------------------------
+
+  Future<void> _loadRecommendations() async {
+    if (!mounted) return;
+
+    setState(() {
+      _recommendationsLoading = true;
+    });
+
+    try {
+      final result = await ApiService.getRecommendations();
+
+      if (!mounted) return;
+
+      setState(() {
+        _recommendations = result
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+        _recommendationsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _recommendationsLoading = false;
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Navigation
+  // ---------------------------------------------------------------------------
+
+  void _openPlace(Map<String, dynamic> place) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => PlaceDetailsScreen(place: place),
+      ),
+    );
+  }
+
+  void _openNearby() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const NearbyScreen(),
+      ),
+    );
+  }
+
+  void _openExplore() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ExploreScreen(),
+      ),
+    );
+  }
+
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const ProfileScreen(),
+      ),
+    );
+  }
+
+  void _openRoutePlanner() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const RouteScreen(),
+      ),
+    );
+  }
+
+  void _openStays() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const StaysScreen(),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  String _prettyCategory(dynamic value) {
+    if (value == null || value.toString().trim().isEmpty) {
+      return 'Place';
+    }
+
+    final raw = value.toString().replaceAll('_', ' ').trim();
+
+    return raw
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map((part) => part[0].toUpperCase() + part.substring(1))
+        .join(' ');
+  }
+
+  String _distanceLabel(dynamic value) {
+    if (value == null) return '';
+
+    final distance = double.tryParse(value.toString());
+    if (distance == null || !distance.isFinite || distance < 0) {
+      return '';
+    }
+
+    if (distance < 1) {
+      return '${(distance * 1000).round()} m away';
+    }
+
+    return '${distance.toStringAsFixed(1)} km away';
+  }
+
+  String? _imageUrl(Map<String, dynamic> data) {
+    for (final key in [
+      'image_url',
+      'photo_url',
+      'image',
+      'photo',
+      'thumbnail',
+    ]) {
+      final value = data[key];
+
+      if (value is String &&
+          (value.startsWith('https://') ||
+              value.startsWith('http://'))) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  IconData _iconForCategory(dynamic value) {
+    final category = value?.toString().toLowerCase() ?? '';
+
+    if (category.contains('food') ||
+        category.contains('restaurant') ||
+        category.contains('cafe')) {
+      return Icons.restaurant_rounded;
+    }
+
+    if (category.contains('stay') ||
+        category.contains('hotel') ||
+        category.contains('lodging')) {
+      return Icons.hotel_rounded;
+    }
+
+    if (category.contains('shopping')) {
+      return Icons.shopping_bag_rounded;
+    }
+
+    if (category.contains('park') || category.contains('leisure')) {
+      return Icons.park_rounded;
+    }
+
+    if (category.contains('museum') ||
+        category.contains('historic') ||
+        category.contains('explore')) {
+      return Icons.account_balance_rounded;
+    }
+
+    return Icons.place_rounded;
+  }
+
+  Widget _categoryPlaceholder({
+    required Color backgroundColor,
+    required Color iconColor,
+    required IconData icon,
+    double iconSize = 40,
+  }) {
+    return Container(
+      color: backgroundColor,
+      alignment: Alignment.center,
+      child: Icon(
+        icon,
+        size: iconSize,
+        color: iconColor,
+      ),
+    );
+  }
+
+  Widget _networkImage({
+    required String imageUrl,
+    required BoxFit fit,
+    required Widget fallback,
+  }) {
+    return Image.network(
+      imageUrl,
+      fit: fit,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => fallback,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            fallback,
+            Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  value: progress.expectedTotalBytes == null
+                      ? null
+                      : progress.cumulativeBytesLoaded /
+                          progress.expectedTotalBytes!,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main UI
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
-        child: CustomScrollView(
-          physics: const BouncingScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-                child: _buildHeader(),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 26, 20, 0),
-                child: _buildGreeting(),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
-                child: _buildSearchSection(),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-                child: _buildQuickActions(),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 30, 20, 0),
-                child: _buildExploreSection(),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 30, 20, 0),
-                child: _buildCompanionSection(),
-              ),
-            ),
-            if (_error != null)
+        child: RefreshIndicator(
+          onRefresh: () async {
+            await Future.wait([
+              _loadNearbyPlaces(),
+              _loadRecommendations(),
+            ]);
+          },
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverToBoxAdapter(child: _buildHeader()),
+              SliverToBoxAdapter(child: _buildGreeting()),
+              SliverToBoxAdapter(child: _buildSearchSection()),
+              SliverToBoxAdapter(child: _buildQuickActions()),
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-                  child: _buildError(),
+                child: _buildSectionHeading(
+                  title: 'Featured destinations',
+                  subtitle: 'Ideas for your next escape',
+                  actionLabel: 'Explore all',
+                  onAction: _openExplore,
                 ),
               ),
-            if (_lastIntent != null && !_loading)
+              SliverToBoxAdapter(child: _buildFeaturedDestinations()),
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-                  child: _buildIntentResult(),
+                child: _buildSectionHeading(
+                  title: 'Discover places near you',
+                  subtitle: 'Real places around your current location',
+                  actionLabel: 'See all',
+                  onAction: _openNearby,
                 ),
               ),
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 28),
-            ),
-          ],
+              SliverToBoxAdapter(child: _buildNearbySection()),
+              SliverToBoxAdapter(
+                child: _buildSectionHeading(
+                  title: 'Recommended for you',
+                  subtitle: 'Suggestions from WorldCompanion',
+                  actionLabel: 'Explore',
+                  onAction: _openExplore,
+                ),
+              ),
+              SliverToBoxAdapter(child: _buildRecommendationsSection()),
+              SliverToBoxAdapter(child: _buildCompanionSection()),
+              const SliverToBoxAdapter(
+                child: SizedBox(height: 28),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildHeader() {
-    return Row(
-      children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: primary,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Icon(
-            Icons.explore_rounded,
-            color: Colors.white,
-            size: 23,
-          ),
-        ),
-        const SizedBox(width: 12),
-        const Expanded(
-          child: Text(
-            'WORLD COMPANION',
-            style: TextStyle(
-              color: deep,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.8,
-            ),
-          ),
-        ),
-        GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const ProfileScreen(),
-              ),
-            );
-          },
-          child: Container(
+    final colors = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
+      child: Row(
+        children: [
+          Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-            color: surface,
-            shape: BoxShape.circle,
-            border: Border.all(
-            color: line,
+              color: colors.primary,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(
+              Icons.explore_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
           ),
-        ),
-        child: const Icon(
-          Icons.person_outline_rounded,
-          color: deep,
-          size: 22,
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'WORLD COMPANION',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: colors.primary,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.15,
+                      ),
+                ),
+                Text(
+                  'Your journey, thoughtfully planned.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
           ),
-        ),
+          IconButton(
+            tooltip: 'Profile',
+            onPressed: _openProfile,
+            icon: Icon(
+              Icons.account_circle_outlined,
+              color: colors.primary,
+              size: 29,
+            ),
+          ),
+        ],
       ),
-    ],
-  );
-}
+    );
+  }
 
   Widget _buildGreeting() {
-    return const Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Good day 👋',
-          style: TextStyle(
-            color: muted,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+    final colors = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'WHERE TO NEXT?',
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: colors.primary,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.5,
+                ),
           ),
-        ),
-        SizedBox(height: 6),
-        Text(
-          'Where would you like\nto go today?',
-          style: TextStyle(
-            color: ink,
-            fontSize: 30,
-            height: 1.12,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.6,
+          const SizedBox(height: 9),
+          Text(
+            'Your next adventure\nstarts here.',
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  color: colors.onSurface,
+                  fontWeight: FontWeight.w800,
+                  height: 1.12,
+                ),
           ),
-        ),
-        SizedBox(height: 10),
-        Text(
-          'Plan a route, discover places, or simply ask your companion.',
-          style: TextStyle(
-            color: muted,
-            fontSize: 14,
-            height: 1.45,
+          const SizedBox(height: 10),
+          Text(
+            'Discover places, plan routes, and make every trip count.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                  height: 1.5,
+                ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildSearchSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            color: surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: line,
-            ),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x0A123B43),
-                blurRadius: 18,
-                offset: Offset(0, 7),
-              ),
-            ],
-          ),
-          child: TextField(
-            controller: _controller,
-            textInputAction: TextInputAction.search,
-            onSubmitted: _submitQuery,
-            style: const TextStyle(
-              color: ink,
-              fontSize: 14,
-            ),
-            decoration: InputDecoration(
-              hintText: 'Where do you want to go?',
-              hintStyle: const TextStyle(
-                color: muted,
-                fontSize: 14,
-              ),
-              prefixIcon: const Icon(
-                Icons.search_rounded,
-                color: primary,
-                size: 23,
-              ),
-              suffixIcon: Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: IconButton(
-                  tooltip: 'Voice search',
-                  onPressed: _showVoiceUnavailable,
-                  icon: const Icon(
-                    Icons.mic_none_rounded,
-                    color: primary,
+    final colors = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: colors.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _controller,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (value) {
+                if (value.trim().isNotEmpty) {
+                  _openCompanion(initialMessage: value);
+                }
+              },
+              minLines: 1,
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: 'Search destinations, places or hotels...',
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  color: colors.primary,
+                ),
+                suffixIcon: IconButton(
+                  tooltip: _isListening
+                      ? 'Stop voice input'
+                      : 'Use voice input',
+                  onPressed: _voiceSubmitting ? null : _toggleListening,
+                  icon: Icon(
+                    _isListening
+                        ? Icons.mic_rounded
+                        : Icons.mic_none_rounded,
+                    color: _isListening ? colors.error : colors.primary,
                   ),
                 ),
-              ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 17,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: FilledButton(
-            onPressed: _loading
-                ? null
-                : () => _submitQuery(_controller.text),
-            style: FilledButton.styleFrom(
-              backgroundColor: primary,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: primary.withOpacity(0.45),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(15),
-              ),
-              elevation: 0,
-            ),
-            child: _loading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Ask your companion',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      SizedBox(width: 8),
-                      Icon(
-                        Icons.arrow_forward_rounded,
-                        size: 19,
-                      ),
-                    ],
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(15),
+                  borderSide: BorderSide(color: colors.outlineVariant),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(15),
+                  borderSide: BorderSide(color: colors.outlineVariant),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(15),
+                  borderSide: BorderSide(
+                    color: colors.primary,
+                    width: 1.5,
                   ),
-          ),
+                ),
+                filled: true,
+                fillColor: colors.surface,
+              ),
+            ),
+            if (_isListening || _voiceSubmitting) ...[
+              const SizedBox(height: 8),
+              Text(
+                _voiceSubmitting
+                    ? 'Opening your companion…'
+                    : 'Listening… pause for 3 seconds to continue',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.primary,
+                    ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () {
+                final query = _controller.text.trim();
+
+                _openCompanion(
+                  initialMessage: query.isEmpty ? null : query,
+                );
+              },
+              icon: const Icon(Icons.auto_awesome_rounded),
+              label: const Text('Ask your companion'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
   Widget _buildQuickActions() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Explore',
-          style: TextStyle(
-            color: ink,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: _quickAction(
-                icon: Icons.map_outlined,
-                title: 'Plan a route',
-                subtitle: 'Find your way',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const RouteScreen(),
+    final colors = Theme.of(context).colorScheme;
+
+    final actions = [
+      (
+        title: 'Explore',
+        icon: Icons.travel_explore_rounded,
+        onTap: _openExplore,
+      ),
+      (
+        title: 'Plan a trip',
+        icon: Icons.route_rounded,
+        onTap: _openRoutePlanner,
+      ),
+      (
+        title: 'Nearby',
+        icon: Icons.my_location_rounded,
+        onTap: _openNearby,
+      ),
+      (
+        title: 'Find stays',
+        icon: Icons.hotel_rounded,
+        onTap: _openStays,
+      ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 8),
+      child: Row(
+        children: actions.map((action) {
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: action.onTap,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: colors.primaryContainer,
+                            borderRadius: BorderRadius.circular(17),
+                          ),
+                          child: Icon(
+                            action.icon,
+                            color: colors.primary,
+                            size: 25,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          action.title,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          style:
+                              Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                      ],
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _quickAction(
-                icon: Icons.place_outlined,
-                title: 'Nearby',
-                subtitle: 'Places around you',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    _comingSoonMessage('Nearby'),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ],
+          );
+        }).toList(),
+      ),
     );
   }
 
-  Widget _quickAction({
-    required IconData icon,
+  Widget _buildSectionHeading({
     required String title,
     required String subtitle,
-    required VoidCallback onTap,
+    required String actionLabel,
+    required VoidCallback onAction,
   }) {
-    return Material(
-      color: surface,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          constraints: const BoxConstraints(
-            minHeight: 118,
-          ),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: line,
+    final colors = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 25, 16, 13),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: colors.onSurface,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                ),
+              ],
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          TextButton(
+            onPressed: onAction,
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeaturedDestinations() {
+    return SizedBox(
+      height: 224,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        scrollDirection: Axis.horizontal,
+        itemCount: _destinations.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
+        itemBuilder: (context, index) {
+          final destination = _destinations[index];
+
+          return SizedBox(
+            width: 255,
+            child: _buildPhotoCard(
+              title: destination['name']!,
+              subtitle: destination['subtitle']!,
+              imageUrl: destination['image']!,
+              onTap: () => _openCompanion(
+                initialMessage:
+                    'Help me plan a trip to ${destination['name']}',
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPhotoCard({
+    required String title,
+    required String subtitle,
+    required String imageUrl,
+    required VoidCallback onTap,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(21),
+      child: Material(
+        color: colors.surfaceContainerHighest,
+        child: InkWell(
+          onTap: onTap,
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              Container(
-                width: 40,
-                height: 40,
+              _networkImage(
+                imageUrl: imageUrl,
+                fit: BoxFit.cover,
+                fallback: _categoryPlaceholder(
+                  backgroundColor: colors.primaryContainer,
+                  iconColor: colors.primary,
+                  icon: Icons.landscape_rounded,
+                  iconSize: 56,
+                ),
+              ),
+              DecoratedBox(
                 decoration: BoxDecoration(
-                  color: aqua,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  icon,
-                  color: primary,
-                  size: 21,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: ink,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.78),
+                    ],
+                    stops: const [0.25, 1],
+                  ),
                 ),
               ),
-              const SizedBox(height: 3),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  color: muted,
-                  fontSize: 11,
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 15,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.white,
+                          ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -518,439 +1089,361 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildExploreSection() {
-    if (_poisLoading) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Discover places',
-            style: TextStyle(
-              color: ink,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 190,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: 3,
-              itemBuilder: (context, index) {
-                return Container(
-                  width: 265,
-                  margin: EdgeInsets.only(
-                    right: index == 2 ? 0 : 14,
-                  ),
-                  decoration: BoxDecoration(
-                    color: surface,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: line,
-                    ),
-                  ),
-                  child: const Center(
-                    child: CircularProgressIndicator(
-                      color: primary,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+  Widget _buildNearbySection() {
+    final colors = Theme.of(context).colorScheme;
+
+    if (_nearbyLoading) {
+      return const SizedBox(
+        height: 135,
+        child: Center(child: CircularProgressIndicator()),
       );
     }
 
-    if (_poisError != null || _pois.isEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Discover places',
-            style: TextStyle(
-              color: ink,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
+    if (_nearbyError != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: colors.outlineVariant),
           ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: surface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: line,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.location_off_rounded,
+                color: colors.primary,
+                size: 28,
+              ),
+              const SizedBox(height: 9),
+              Text(
+                _nearbyError!,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: _loadNearbyPlaces,
+                    child: const Text('Try again'),
+                  ),
+                  TextButton(
+                    onPressed: _openNearby,
+                    child: const Text('Open Nearby'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_nearbyPlaces.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: colors.outlineVariant),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.explore_rounded,
+                color: colors.primary,
+                size: 30,
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'No nearby places were returned. Try refreshing or explore the full map.',
+                ),
+              ),
+              IconButton(
+                onPressed: _loadNearbyPlaces,
+                tooltip: 'Refresh nearby places',
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final visiblePlaces = _nearbyPlaces.take(8).toList();
+
+    return SizedBox(
+      height: 236,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        scrollDirection: Axis.horizontal,
+        itemCount: visiblePlaces.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 13),
+        itemBuilder: (context, index) {
+          final place = visiblePlaces[index];
+          final name = place['name']?.toString() ?? 'Nearby place';
+          final category = _prettyCategory(
+            place['subcategory'] ?? place['category'],
+          );
+          final distance = _distanceLabel(place['distance_km']);
+          final imageUrl = _imageUrl(place);
+
+          final fallback = _categoryPlaceholder(
+            backgroundColor: colors.primaryContainer,
+            iconColor: colors.primary,
+            icon: _iconForCategory(place['category']),
+          );
+
+          return SizedBox(
+            width: 210,
+            child: Material(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(20),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => _openPlace(place),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      height: 126,
+                      width: double.infinity,
+                      child: imageUrl == null
+                          ? fallback
+                          : _networkImage(
+                              imageUrl: imageUrl,
+                              fit: BoxFit.cover,
+                              fallback: fallback,
+                            ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                Theme.of(context).textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            distance.isEmpty
+                                ? category
+                                : '$category · $distance',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.location_off_outlined,
-                  color: muted,
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Unable to load places right now.',
-                    style: TextStyle(
-                      color: muted,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildRecommendationsSection() {
+    final colors = Theme.of(context).colorScheme;
+
+    if (_recommendationsLoading) {
+      return const SizedBox(
+        height: 90,
+        child: Center(child: CircularProgressIndicator()),
       );
     }
 
-    final poiEntries = _pois.entries.toList();
+    if (_recommendations.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          padding: const EdgeInsets.all(17),
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: colors.outlineVariant),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.lightbulb_outline_rounded,
+                color: colors.primary,
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Explore places and save your travel preferences to get more relevant suggestions.',
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Discover places',
-                style: TextStyle(
-                  color: ink,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const ExploreScreen(),
-                  ),
-                );
-              },
-              child: const Text(
-                'See all',
-                style: TextStyle(
-                  color: primary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 190,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            itemCount: poiEntries.length,
-            itemBuilder: (context, index) {
-              final poi = {
-                ...Map<String, dynamic>.from(poiEntries[index].value),
-                'id': poiEntries[index].key,
-              };
+      children: _recommendations.take(4).map((place) {
+        final item = Map<String, dynamic>.from(place);
+        final imageUrl = _imageUrl(item);
+        final name = item['name']?.toString() ??
+            item['title']?.toString() ??
+            'Recommended place';
+        final category = _prettyCategory(
+          item['subcategory'] ?? item['category'],
+        );
 
-              final title =
-                  poi['name']?.toString() ?? 'Unknown place';
+        final fallback = _categoryPlaceholder(
+          backgroundColor: colors.primaryContainer,
+          iconColor: colors.primary,
+          icon: _iconForCategory(item['category']),
+          iconSize: 28,
+        );
 
-              final category =
-                  poi['category']?.toString() ?? 'destination';
-
-              return Padding(
-                padding: EdgeInsets.only(
-                  right: index == poiEntries.length - 1 ? 0 : 14,
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(22),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => PlaceDetailsScreen(
-                            place: poi,
-                          ),
-                        ),
-                      );
-                    },
-                    child: _destinationCard(
-                      title: title,
-                      subtitle: _formatCategory(category),
-                      icon: _categoryIcon(category),
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+          child: Material(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(18),
+            child: InkWell(
+              onTap: () => _openPlace(item),
+              borderRadius: BorderRadius.circular(18),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(13),
+                      child: SizedBox(
+                        width: 68,
+                        height: 68,
+                        child: imageUrl == null
+                            ? fallback
+                            : _networkImage(
+                                imageUrl: imageUrl,
+                                fit: BoxFit.cover,
+                                fallback: fallback,
+                              ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 13),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                Theme.of(context).textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            category,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ],
                 ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _destinationCard({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-  }) {
-    return Container(
-      width: 265,
-      decoration: BoxDecoration(
-        color: deep,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -30,
-            top: -35,
-            child: Container(
-              width: 145,
-              height: 145,
-              decoration: BoxDecoration(
-                color: primary.withOpacity(0.55),
-                shape: BoxShape.circle,
               ),
             ),
           ),
-          Positioned(
-            left: -35,
-            bottom: -50,
-            child: Container(
-              width: 150,
-              height: 150,
-              decoration: BoxDecoration(
-                color: accent.withOpacity(0.22),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(
-                    icon,
-                    color: Colors.white,
-                    size: 23,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.72),
-                    fontSize: 12,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      }).toList(),
     );
-  }
-
-  String _formatCategory(String category) {
-    switch (category.toLowerCase()) {
-      case 'area':
-        return 'Area';
-      case 'park':
-        return 'Park';
-      case 'food':
-        return 'Food & dining';
-      case 'shopping':
-        return 'Shopping';
-      case 'landmark':
-        return 'Landmark';
-      case 'restaurant':
-        return 'Restaurant';
-      default:
-        return 'Destination';
-    }
-  }
-
-  IconData _categoryIcon(String category) {
-    switch (category.toLowerCase()) {
-      case 'area':
-        return Icons.location_city_rounded;
-      case 'park':
-        return Icons.park_rounded;
-      case 'food':
-        return Icons.restaurant_rounded;
-      case 'shopping':
-        return Icons.shopping_bag_rounded;
-      case 'landmark':
-        return Icons.account_balance_rounded;
-      case 'restaurant':
-        return Icons.restaurant_rounded;
-      default:
-        return Icons.place_rounded;
-    }
   }
 
   Widget _buildCompanionSection() {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: aqua,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFFCBE9E5),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: primary,
-              borderRadius: BorderRadius.circular(15),
-            ),
-            child: const Icon(
-              Icons.auto_awesome_rounded,
-              color: Colors.white,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final colors = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 25, 20, 0),
+      child: Material(
+        color: colors.primary,
+        borderRadius: BorderRadius.circular(22),
+        child: InkWell(
+          onTap: () => _openCompanion(),
+          borderRadius: BorderRadius.circular(22),
+          child: Padding(
+            padding: const EdgeInsets.all(19),
+            child: Row(
               children: [
-                Text(
-                  'Your travel companion',
-                  style: TextStyle(
-                    color: deep,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Colors.white,
+                    size: 25,
                   ),
                 ),
-                SizedBox(height: 4),
-                Text(
-                  'Ask naturally. Your request can help plan what comes next.',
-                  style: TextStyle(
-                    color: muted,
-                    fontSize: 12,
-                    height: 1.4,
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your travel companion',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                      SizedBox(height: 5),
+                      Text(
+                        'Ask questions, discover places and plan your next journey.',
+                        style: TextStyle(
+                          color: Colors.white,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
                   ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.arrow_forward_rounded,
+                  color: Colors.white,
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildError() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF1F1),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: const Color(0xFFF1CACA),
         ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: Color(0xFFC94B4B),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              _error!,
-              style: const TextStyle(
-                color: Color(0xFF9B3333),
-                fontSize: 12,
-                height: 1.4,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIntentResult() {
-    final intentName =
-        _lastIntent?['intent']?.toString() ?? 'unknown';
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: line,
-        ),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.check_circle_outline_rounded,
-            color: primary,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Request understood as $intentName.',
-              style: const TextStyle(
-                color: ink,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  SnackBar _comingSoonMessage(String section) {
-    return SnackBar(
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: deep,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-      content: Text(
-        '$section is connected to the existing project scope and will be wired as its screen is built.',
       ),
     );
   }

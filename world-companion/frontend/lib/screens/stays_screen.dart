@@ -1,6 +1,13 @@
+
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
+import '../theme/world_companion_colors.dart';
+import '../theme/world_companion_motion.dart';
+import '../theme/world_companion_radius.dart';
+import '../theme/world_companion_spacing.dart';
+import '../theme/world_companion_typography.dart';
+import 'app_shell.dart';
 import 'hotel_details_screen.dart';
 
 class StaysScreen extends StatefulWidget {
@@ -24,6 +31,10 @@ class _StaysScreenState extends State<StaysScreen> {
     _loadHotels();
   }
 
+  // ---------------------------------------------------------------------------
+  // Hotel data
+  // ---------------------------------------------------------------------------
+
   Future<void> _loadHotels() async {
     setState(() {
       _isLoading = true;
@@ -32,7 +43,6 @@ class _StaysScreenState extends State<StaysScreen> {
 
     try {
       final response = await ApiService.getHotels();
-
       final hotels = _extractHotels(response);
 
       if (!mounted) return;
@@ -42,6 +52,8 @@ class _StaysScreenState extends State<StaysScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      debugPrint('STAYS LOAD ERROR: $e');
+
       if (!mounted) return;
 
       setState(() {
@@ -52,17 +64,13 @@ class _StaysScreenState extends State<StaysScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _extractHotels(
-    dynamic response,
-  ) {
+  List<Map<String, dynamic>> _extractHotels(dynamic response) {
     final result = <Map<String, dynamic>>[];
 
     if (response is List) {
       for (final item in response) {
         if (item is Map) {
-          result.add(
-            Map<String, dynamic>.from(item),
-          );
+          result.add(Map<String, dynamic>.from(item));
         }
       }
 
@@ -87,9 +95,7 @@ class _StaysScreenState extends State<StaysScreen> {
       if (hotelData is List) {
         for (final item in hotelData) {
           if (item is Map) {
-            result.add(
-              Map<String, dynamic>.from(item),
-            );
+            result.add(Map<String, dynamic>.from(item));
           }
         }
       }
@@ -98,78 +104,52 @@ class _StaysScreenState extends State<StaysScreen> {
     return result;
   }
 
-  String _getName(
-    Map<String, dynamic> hotel,
-  ) {
+  String _getName(Map<String, dynamic> hotel) {
     return hotel['name']?.toString() ?? 'Unnamed stay';
   }
 
-  String _getArea(
-    Map<String, dynamic> hotel,
-  ) {
+  String _getArea(Map<String, dynamic> hotel) {
     return hotel['area']?.toString() ?? 'Bengaluru';
   }
 
-  double? _getPrice(
-    Map<String, dynamic> hotel,
-  ) {
+  double? _getPrice(Map<String, dynamic> hotel) {
     final value = hotel['price_per_night'];
 
     if (value is num) {
       return value.toDouble();
     }
 
-    return double.tryParse(
-      value?.toString() ?? '',
-    );
+    return double.tryParse(value?.toString() ?? '');
   }
 
-  double? _getRating(
-    Map<String, dynamic> hotel,
-  ) {
+  double? _getRating(Map<String, dynamic> hotel) {
     final value = hotel['rating'];
 
     if (value is num) {
       return value.toDouble();
     }
 
-    return double.tryParse(
-      value?.toString() ?? '',
-    );
+    return double.tryParse(value?.toString() ?? '');
   }
 
-  List<String> _getFacilities(
-    Map<String, dynamic> hotel,
-  ) {
+  List<String> _getFacilities(Map<String, dynamic> hotel) {
     final value = hotel['facilities'];
 
     if (value is List) {
-      return value
-          .map(
-            (item) => item.toString(),
-          )
-          .toList();
+      return value.map((item) => item.toString()).toList();
     }
 
     if (value is Map) {
       return value.entries
-          .where(
-            (entry) =>
-                entry.value == true ||
-                entry.value != null,
-          )
-          .map(
-            (entry) => entry.key.toString(),
-          )
+          .where((entry) => entry.value == true || entry.value != null)
+          .map((entry) => entry.key.toString())
           .toList();
     }
 
     return [];
   }
 
-  String _formatPrice(
-    double? price,
-  ) {
+  String _formatPrice(double? price) {
     if (price == null) {
       return 'Price unavailable';
     }
@@ -177,176 +157,172 @@ class _StaysScreenState extends State<StaysScreen> {
     return '₹${price.toStringAsFixed(0)} / night';
   }
 
-  void _selectCategory(
-    int index,
-  ) {
+  void _selectCategory(int index) {
     setState(() {
       _selectedCategory = index;
     });
   }
 
-  @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme = Theme.of(context);
+  // ---------------------------------------------------------------------------
+  // Screen
+  // ---------------------------------------------------------------------------
 
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          theme.scaffoldBackgroundColor,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text(
-          'Stay',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-          ),
+        leading: IconButton(
+          tooltip: 'Home',
+          onPressed: () {
+            AppShellNavigation.of(context).goHome();
+          },
+          icon: const Icon(Icons.arrow_back_rounded),
         ),
-        backgroundColor:
-            theme.scaffoldBackgroundColor,
-        foregroundColor:
-            const Color(0xFF172326),
-        elevation: 0,
-        scrolledUnderElevation: 0,
+        title: Text(
+          'Stays',
+          style: WorldCompanionTypography.textTheme.titleLarge,
+        ),
       ),
       body: RefreshIndicator(
+        color: WorldCompanionColors.oceanBlue,
         onRefresh: _loadHotels,
-        child: _buildBody(context),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final pagePadding = constraints.maxWidth >= 1000
+                ? WorldCompanionSpacing.desktopPage
+                : constraints.maxWidth >= 600
+                    ? WorldCompanionSpacing.tabletPage
+                    : WorldCompanionSpacing.mobilePage;
+
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              padding: EdgeInsets.fromLTRB(
+                pagePadding,
+                WorldCompanionSpacing.sm,
+                pagePadding,
+                WorldCompanionSpacing.xxxl,
+              ),
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1120),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHero(),
+                        const SizedBox(height: WorldCompanionSpacing.xl),
+                        _buildCategorySelector(),
+                        const SizedBox(height: WorldCompanionSpacing.xl),
+                        _buildSelectedCategory(constraints.maxWidth),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildBody(
-    BuildContext context,
-  ) {
-    return LayoutBuilder(
-      builder: (
-        context,
-        constraints,
-      ) {
-        final isWide =
-            constraints.maxWidth >= 800;
+  // ---------------------------------------------------------------------------
+  // Hero
+  // ---------------------------------------------------------------------------
 
-        return SingleChildScrollView(
-          physics:
-              const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(
-            20,
-            8,
-            20,
-            40,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: 1100,
-              ),
-              child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
-                children: [
-                  _buildHero(context),
-
-                  const SizedBox(
-                    height: 22,
-                  ),
-
-                  _buildCategorySelector(
-                    context,
-                  ),
-
-                  const SizedBox(
-                    height: 24,
-                  ),
-
-                  _buildSelectedCategory(
-                    context,
-                    isWide,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildHero(
-    BuildContext context,
-  ) {
-    final theme = Theme.of(context);
-
+  Widget _buildHero() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
       decoration: BoxDecoration(
-        borderRadius:
-            BorderRadius.circular(28),
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            theme.colorScheme.primary,
-            const Color(0xFF123B43),
+            WorldCompanionColors.deepOcean,
+            WorldCompanionColors.oceanBlue,
           ],
         ),
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
       ),
-      child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+      child: Stack(
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: Colors.white
-                  .withOpacity(0.14),
-              borderRadius:
-                  BorderRadius.circular(16),
-            ),
-            child: const Icon(
-              Icons.hotel_outlined,
-              color: Colors.white,
-              size: 27,
+          Positioned(
+            right: -12,
+            bottom: -20,
+            child: Icon(
+              Icons.hotel_rounded,
+              size: 116,
+              color: Colors.white.withOpacity(0.07),
             ),
           ),
-
-          const SizedBox(
-            height: 18,
-          ),
-
-          const Text(
-            'Find your stay',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 25,
-              fontWeight: FontWeight.w700,
-              height: 1.2,
-            ),
-          ),
-
-          const SizedBox(
-            height: 8,
-          ),
-
-          Text(
-            'Hotels, hostels and dorms for your journey.',
-            style: TextStyle(
-              color: Colors.white
-                  .withOpacity(0.82),
-              fontSize: 14,
-              height: 1.5,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.13),
+                  borderRadius: BorderRadius.circular(
+                    WorldCompanionRadius.medium,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.bed_rounded,
+                  color: Colors.white,
+                  size: 27,
+                ),
+              ),
+              const SizedBox(height: WorldCompanionSpacing.lg),
+              Text(
+                'Find your place',
+                style: WorldCompanionTypography.textTheme.displayMedium
+                    ?.copyWith(color: Colors.white),
+              ),
+              const SizedBox(height: WorldCompanionSpacing.xs),
+              Text(
+                'Discover stays for your next journey.',
+                style: WorldCompanionTypography.textTheme.bodyMedium
+                    ?.copyWith(
+                  color: Colors.white.withOpacity(0.84),
+                ),
+              ),
+              const SizedBox(height: WorldCompanionSpacing.lg),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.hotel_outlined,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: WorldCompanionSpacing.xs),
+                  Text(
+                    'Explore available hotels',
+                    style: WorldCompanionTypography.textTheme.labelLarge
+                        ?.copyWith(color: Colors.white),
+                  ),
+                ],
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCategorySelector(
-    BuildContext context,
-  ) {
-    final categories = [
+  // ---------------------------------------------------------------------------
+  // Categories
+  // ---------------------------------------------------------------------------
+
+  Widget _buildCategorySelector() {
+    const categories = [
       (
         label: 'Hotels',
         icon: Icons.hotel_outlined,
@@ -364,403 +340,304 @@ class _StaysScreenState extends State<StaysScreen> {
       ),
     ];
 
-    return SizedBox(
-      height: 92,
-      child: Row(
-        children: List.generate(
-          categories.length,
-          (index) {
-            final category =
-                categories[index];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 350;
 
-            final isSelected =
-                _selectedCategory == index;
+        return Row(
+          children: List.generate(categories.length, (index) {
+            final category = categories[index];
 
             return Expanded(
               child: Padding(
                 padding: EdgeInsets.only(
-                  right:
-                      index == categories.length - 1
-                          ? 0
-                          : 10,
+                  right: index == categories.length - 1
+                      ? 0
+                      : WorldCompanionSpacing.sm,
                 ),
                 child: _buildCategoryCard(
-                  context,
-                  index,
-                  category.label,
-                  category.icon,
-                  category.available,
-                  isSelected,
+                  index: index,
+                  label: category.label,
+                  icon: category.icon,
+                  available: category.available,
+                  compact: compact,
                 ),
               ),
             );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategoryCard(
-    BuildContext context,
-    int index,
-    String label,
-    IconData icon,
-    bool available,
-    bool selected,
-  ) {
-    final theme = Theme.of(context);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius:
-            BorderRadius.circular(18),
-        onTap: () {
-          _selectCategory(index);
-        },
-        child: AnimatedContainer(
-          duration:
-              const Duration(milliseconds: 180),
-          padding:
-              const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 12,
-          ),
-          decoration: BoxDecoration(
-            color: selected
-                ? theme.colorScheme.primary
-                : theme.colorScheme.surface,
-            borderRadius:
-                BorderRadius.circular(18),
-            border: Border.all(
-              color: selected
-                  ? theme.colorScheme.primary
-                  : const Color(0xFFDCE5E4),
-            ),
-          ),
-          child: Column(
-            mainAxisAlignment:
-                MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 22,
-                color: selected
-                    ? Colors.white
-                    : const Color(0xFF68777B),
-              ),
-
-              const SizedBox(
-                height: 6,
-              ),
-
-              Text(
-                label,
-                maxLines: 1,
-                overflow:
-                    TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: selected
-                      ? Colors.white
-                      : const Color(0xFF172326),
-                  fontSize: 12,
-                  fontWeight:
-                      FontWeight.w700,
-                ),
-              ),
-
-              if (!available)
-                Text(
-                  'Soon',
-                  style: TextStyle(
-                    color: selected
-                        ? Colors.white
-                            .withOpacity(0.75)
-                        : const Color(
-                            0xFF68777B,
-                          ),
-                    fontSize: 9,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSelectedCategory(
-    BuildContext context,
-    bool isWide,
-  ) {
-    if (_selectedCategory != 0) {
-      return _buildUnavailableCategory(
-        context,
-      );
-    }
-
-    if (_isLoading) {
-      return const Padding(
-        padding: EdgeInsets.only(
-          top: 80,
-        ),
-        child: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    if (_errorMessage != null) {
-      return _buildErrorState(
-        context,
-      );
-    }
-
-    if (_hotels.isEmpty) {
-      return _buildEmptyState(
-        context,
-      );
-    }
-
-    return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Hotels',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(
-                      fontWeight:
-                          FontWeight.w700,
-                    ),
-              ),
-            ),
-
-            Text(
-              '${_hotels.length} available',
-              style: const TextStyle(
-                color: Color(0xFF68777B),
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(
-          height: 14,
-        ),
-
-        isWide
-            ? _buildWideGrid(context)
-            : _buildMobileList(context),
-      ],
-    );
-  }
-
-  Widget _buildMobileList(
-    BuildContext context,
-  ) {
-    return Column(
-      children: _hotels.map(
-        (hotel) {
-          return Padding(
-            padding:
-                const EdgeInsets.only(
-              bottom: 14,
-            ),
-            child: _buildHotelCard(
-              context,
-              hotel,
-            ),
-          );
-        },
-      ).toList(),
-    );
-  }
-
-  Widget _buildWideGrid(
-    BuildContext context,
-  ) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics:
-          const NeverScrollableScrollPhysics(),
-      itemCount: _hotels.length,
-      gridDelegate:
-          const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-        childAspectRatio: 1.6,
-      ),
-      itemBuilder: (
-        context,
-        index,
-      ) {
-        return _buildHotelCard(
-          context,
-          _hotels[index],
+          }),
         );
       },
     );
   }
 
-  Widget _buildHotelCard(
-    BuildContext context,
-    Map<String, dynamic> hotel,
-  ) {
-    final theme = Theme.of(context);
+  Widget _buildCategoryCard({
+    required int index,
+    required String label,
+    required IconData icon,
+    required bool available,
+    required bool compact,
+  }) {
+    final selected = _selectedCategory == index;
 
+    return AnimatedContainer(
+      duration: WorldCompanionMotion.standard,
+      curve: WorldCompanionMotion.standardCurve,
+      decoration: BoxDecoration(
+        color: selected
+            ? WorldCompanionColors.deepOcean
+            : WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
+        border: Border.all(
+          color: selected
+              ? WorldCompanionColors.deepOcean
+              : WorldCompanionColors.border,
+        ),
+        boxShadow: selected
+            ? [
+                BoxShadow(
+                  color: WorldCompanionColors.deepOcean.withOpacity(0.12),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
+          onTap: () => _selectCategory(index),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 4 : WorldCompanionSpacing.xs,
+              vertical: WorldCompanionSpacing.md,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 24,
+                  color: selected
+                      ? Colors.white
+                      : WorldCompanionColors.secondaryText,
+                ),
+                const SizedBox(height: WorldCompanionSpacing.xs),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: WorldCompanionTypography.textTheme.labelLarge
+                      ?.copyWith(
+                    color: selected
+                        ? Colors.white
+                        : WorldCompanionColors.primaryText,
+                  ),
+                ),
+                const SizedBox(height: WorldCompanionSpacing.xxs),
+                Text(
+                  available ? 'Available' : 'Coming soon',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: WorldCompanionTypography.textTheme.labelSmall
+                      ?.copyWith(
+                    color: selected
+                        ? Colors.white.withOpacity(0.75)
+                        : WorldCompanionColors.mutedText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Selected category
+  // ---------------------------------------------------------------------------
+
+  Widget _buildSelectedCategory(double screenWidth) {
+    if (_selectedCategory != 0) {
+      return _buildUnavailableCategory();
+    }
+
+    if (_isLoading) {
+      return _buildLoadingState();
+    }
+
+    if (_errorMessage != null) {
+      return _buildErrorState();
+    }
+
+    if (_hotels.isEmpty) {
+      return _buildEmptyState();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Available hotels',
+                style: WorldCompanionTypography.textTheme.headlineSmall,
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: WorldCompanionSpacing.sm,
+                vertical: WorldCompanionSpacing.xs,
+              ),
+              decoration: BoxDecoration(
+                color: WorldCompanionColors.infoSurface,
+                borderRadius: BorderRadius.circular(
+                  WorldCompanionRadius.pill,
+                ),
+              ),
+              child: Text(
+                '${_hotels.length} found',
+                style: WorldCompanionTypography.textTheme.labelMedium
+                    ?.copyWith(
+                  color: WorldCompanionColors.oceanBlue,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: WorldCompanionSpacing.xs),
+        Text(
+          'Choose a stay to see its details.',
+          style: WorldCompanionTypography.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: WorldCompanionSpacing.lg),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 760
+                ? 2
+                : 1;
+
+            if (columns == 1) {
+              return Column(
+                children: _hotels.map((hotel) {
+                  return Padding(
+                    padding: const EdgeInsets.only(
+                      bottom: WorldCompanionSpacing.md,
+                    ),
+                    child: _buildHotelCard(hotel),
+                  );
+                }).toList(),
+              );
+            }
+
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _hotels.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: WorldCompanionSpacing.md,
+                mainAxisSpacing: WorldCompanionSpacing.md,
+                mainAxisExtent: 270,
+              ),
+              itemBuilder: (context, index) {
+                return _buildHotelCard(_hotels[index]);
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHotelCard(Map<String, dynamic> hotel) {
     final name = _getName(hotel);
     final area = _getArea(hotel);
     final price = _getPrice(hotel);
     final rating = _getRating(hotel);
-    final facilities =
-        _getFacilities(hotel);
+    final facilities = _getFacilities(hotel);
 
     return Material(
-      color: Colors.transparent,
+      color: WorldCompanionColors.surface,
+      borderRadius: BorderRadius.circular(WorldCompanionRadius.extraLarge),
       child: InkWell(
-        borderRadius:
-            BorderRadius.circular(22),
-
-        // CHANGED:
-        // Hotel cards now open the real
-        // HotelDetailsScreen using the
-        // exact backend hotel object.
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
         onTap: () {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) =>
-                  HotelDetailsScreen(
-                hotel: hotel,
-              ),
+              builder: (_) => HotelDetailsScreen(hotel: hotel),
             ),
           );
         },
-
         child: Container(
           width: double.infinity,
-          padding:
-              const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(WorldCompanionSpacing.md),
           decoration: BoxDecoration(
-            color:
-                theme.colorScheme.surface,
-            borderRadius:
-                BorderRadius.circular(22),
-            border: Border.all(
-              color:
-                  const Color(0xFFDCE5E4),
+            borderRadius: BorderRadius.circular(
+              WorldCompanionRadius.extraLarge,
             ),
-            boxShadow: [
+            border: Border.all(color: WorldCompanionColors.border),
+            boxShadow: const [
               BoxShadow(
-                color: Colors.black
-                    .withOpacity(0.04),
-                blurRadius: 18,
-                offset: const Offset(
-                  0,
-                  6,
-                ),
+                color: Color(0x080B2545),
+                blurRadius: 16,
+                offset: Offset(0, 5),
               ),
             ],
           ),
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 56,
-                    height: 56,
-                    decoration:
-                        BoxDecoration(
-                      color:
-                          const Color(
-                        0xFFDFF4F1,
-                      ),
-                      borderRadius:
-                          BorderRadius
-                              .circular(
-                        16,
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: WorldCompanionColors.infoSurface,
+                      borderRadius: BorderRadius.circular(
+                        WorldCompanionRadius.medium,
                       ),
                     ),
-                    child: Icon(
-                      Icons.hotel_outlined,
-                      color: theme
-                          .colorScheme
-                          .primary,
+                    child: const Icon(
+                      Icons.hotel_rounded,
+                      color: WorldCompanionColors.oceanBlue,
                       size: 28,
                     ),
                   ),
-
-                  const SizedBox(
-                    width: 14,
-                  ),
-
+                  const SizedBox(width: WorldCompanionSpacing.sm),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           name,
                           maxLines: 2,
-                          overflow:
-                              TextOverflow
-                                  .ellipsis,
-                          style: theme
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                fontWeight:
-                                    FontWeight
-                                        .w700,
-                              ),
+                          overflow: TextOverflow.ellipsis,
+                          style: WorldCompanionTypography.textTheme.titleMedium,
                         ),
-
-                        const SizedBox(
-                          height: 5,
-                        ),
-
+                        const SizedBox(height: WorldCompanionSpacing.xs),
                         Row(
                           children: [
                             const Icon(
-                              Icons
-                                  .location_on_outlined,
+                              Icons.location_on_outlined,
                               size: 15,
-                              color: Color(
-                                0xFF68777B,
-                              ),
+                              color: WorldCompanionColors.mutedText,
                             ),
-
-                            const SizedBox(
-                              width: 4,
-                            ),
-
+                            const SizedBox(width: WorldCompanionSpacing.xxs),
                             Expanded(
                               child: Text(
                                 area,
                                 maxLines: 1,
-                                overflow:
-                                    TextOverflow
-                                        .ellipsis,
-                                style:
-                                    const TextStyle(
-                                  color: Color(
-                                    0xFF68777B,
-                                  ),
-                                  fontSize: 12,
-                                ),
+                                overflow: TextOverflow.ellipsis,
+                                style: WorldCompanionTypography
+                                    .textTheme.bodySmall,
                               ),
                             ),
                           ],
@@ -768,141 +645,116 @@ class _StaysScreenState extends State<StaysScreen> {
                       ],
                     ),
                   ),
-
-                  if (rating != null)
+                  if (rating != null) ...[
+                    const SizedBox(width: WorldCompanionSpacing.xs),
                     Container(
-                      padding:
-                          const EdgeInsets
-                              .symmetric(
-                        horizontal: 8,
-                        vertical: 6,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: WorldCompanionSpacing.xs,
+                        vertical: WorldCompanionSpacing.xxs,
                       ),
-                      decoration:
-                          BoxDecoration(
-                        color:
-                            const Color(
-                          0xFFFFF3E8,
-                        ),
-                        borderRadius:
-                            BorderRadius
-                                .circular(
-                          10,
+                      decoration: BoxDecoration(
+                        color: WorldCompanionColors.warningSurface,
+                        borderRadius: BorderRadius.circular(
+                          WorldCompanionRadius.small,
                         ),
                       ),
                       child: Row(
-                        mainAxisSize:
-                            MainAxisSize.min,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(
-                            Icons
-                                .star_rounded,
+                            Icons.star_rounded,
+                            color: WorldCompanionColors.warning,
                             size: 15,
-                            color: Color(
-                              0xFFF27C4A,
-                            ),
                           ),
-
-                          const SizedBox(
-                            width: 3,
-                          ),
-
+                          const SizedBox(width: 3),
                           Text(
-                            rating
-                                .toStringAsFixed(
-                              1,
-                            ),
-                            style:
-                                const TextStyle(
-                              fontSize: 12,
-                              fontWeight:
-                                  FontWeight
-                                      .w700,
+                            rating.toStringAsFixed(1),
+                            style: WorldCompanionTypography
+                                .textTheme.labelMedium
+                                ?.copyWith(
+                              color: WorldCompanionColors.primaryText,
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ],
                 ],
               ),
-
-              const SizedBox(
-                height: 18,
+              const SizedBox(height: WorldCompanionSpacing.md),
+              if (facilities.isNotEmpty)
+                Wrap(
+                  spacing: WorldCompanionSpacing.xs,
+                  runSpacing: WorldCompanionSpacing.xs,
+                  children: facilities.take(3).map((facility) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: WorldCompanionSpacing.sm,
+                        vertical: WorldCompanionSpacing.xs,
+                      ),
+                      decoration: BoxDecoration(
+                        color: WorldCompanionColors.aiSurface,
+                        borderRadius: BorderRadius.circular(
+                          WorldCompanionRadius.small,
+                        ),
+                      ),
+                      child: Text(
+                        facility,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: WorldCompanionTypography.textTheme.labelSmall
+                            ?.copyWith(
+                          color: WorldCompanionColors.secondaryText,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              const Spacer(),
+              const Divider(
+                height: WorldCompanionSpacing.lg,
+                color: WorldCompanionColors.border,
               ),
-
               Row(
-                crossAxisAlignment:
-                    CrossAxisAlignment.end,
                 children: [
                   Expanded(
-                    child: Text(
-                      _formatPrice(price),
-                      style: TextStyle(
-                        color: theme
-                            .colorScheme
-                            .primary,
-                        fontSize: 16,
-                        fontWeight:
-                            FontWeight.w800,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'PRICE PER NIGHT',
+                          style: WorldCompanionTypography
+                              .textTheme.labelSmall,
+                        ),
+                        const SizedBox(height: WorldCompanionSpacing.xxs),
+                        Text(
+                          _formatPrice(price),
+                          style: WorldCompanionTypography
+                              .textTheme.titleMedium
+                              ?.copyWith(
+                            color: WorldCompanionColors.oceanBlue,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-
-                  const Icon(
-                    Icons
-                        .arrow_forward_rounded,
-                    color: Color(
-                      0xFF68777B,
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: WorldCompanionColors.deepOcean,
+                      borderRadius: BorderRadius.circular(
+                        WorldCompanionRadius.medium,
+                      ),
                     ),
-                    size: 20,
+                    child: const Icon(
+                      Icons.arrow_forward_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                 ],
               ),
-
-              if (facilities.isNotEmpty) ...[
-                const SizedBox(
-                  height: 14,
-                ),
-
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children:
-                      facilities.take(3).map(
-                    (facility) {
-                      return Container(
-                        padding:
-                            const EdgeInsets
-                                .symmetric(
-                          horizontal: 9,
-                          vertical: 6,
-                        ),
-                        decoration:
-                            BoxDecoration(
-                          color:
-                              const Color(
-                            0xFFF7F9F8,
-                          ),
-                          borderRadius:
-                              BorderRadius
-                                  .circular(
-                            10,
-                          ),
-                        ),
-                        child: Text(
-                          facility,
-                          style:
-                              const TextStyle(
-                            fontSize: 11,
-                            color: Color(
-                              0xFF68777B,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ).toList(),
-                ),
-              ],
             ],
           ),
         ),
@@ -910,197 +762,127 @@ class _StaysScreenState extends State<StaysScreen> {
     );
   }
 
-  Widget _buildUnavailableCategory(
-    BuildContext context,
-  ) {
-    return Container(
-      width: double.infinity,
-      padding:
-          const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color:
-            Theme.of(context)
-                .colorScheme
-                .surface,
-        borderRadius:
-            BorderRadius.circular(22),
-        border: Border.all(
-          color:
-              const Color(0xFFDCE5E4),
-        ),
+  // ---------------------------------------------------------------------------
+  // Loading, error and empty states
+  // ---------------------------------------------------------------------------
+
+  Widget _buildLoadingState() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        vertical: WorldCompanionSpacing.xxxl,
       ),
       child: Column(
         children: [
-          Icon(
-            _selectedCategory == 1
-                ? Icons.groups_outlined
-                : Icons.bed_outlined,
-            size: 48,
-            color:
-                const Color(0xFF68777B),
+          const CircularProgressIndicator(
+            color: WorldCompanionColors.oceanBlue,
           ),
-
-          const SizedBox(
-            height: 14,
-          ),
-
+          const SizedBox(height: WorldCompanionSpacing.md),
           Text(
-            _selectedCategory == 1
-                ? 'Hostels'
-                : 'Dorms',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight:
-                  FontWeight.w700,
-            ),
-          ),
-
-          const SizedBox(
-            height: 6,
-          ),
-
-          const Text(
-            'This stay category will be connected when its existing backend support is available.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF68777B),
-              fontSize: 13,
-              height: 1.5,
-            ),
+            'Finding available stays…',
+            style: WorldCompanionTypography.textTheme.bodyMedium,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEmptyState(
-    BuildContext context,
-  ) {
-    return Container(
-      width: double.infinity,
-      padding:
-          const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color:
-            Theme.of(context)
-                .colorScheme
-                .surface,
-        borderRadius:
-            BorderRadius.circular(22),
-        border: Border.all(
-          color:
-              const Color(0xFFDCE5E4),
-        ),
-      ),
-      child: const Column(
-        children: [
-          Icon(
-            Icons.hotel_outlined,
-            size: 48,
-            color: Color(0xFF68777B),
-          ),
-
-          SizedBox(
-            height: 14,
-          ),
-
-          Text(
-            'No hotels available',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight:
-                  FontWeight.w700,
-            ),
-          ),
-
-          SizedBox(
-            height: 6,
-          ),
-
-          Text(
-            'The existing backend did not return any hotel listings.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF68777B),
-              fontSize: 13,
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
+  Widget _buildErrorState() {
+    return _stateCard(
+      icon: Icons.cloud_off_outlined,
+      iconColor: WorldCompanionColors.error,
+      title: 'Unable to load hotels',
+      message: _errorMessage ??
+          'Check the backend connection and try again.',
+      actionLabel: 'Try again',
+      onAction: _loadHotels,
     );
   }
 
-  Widget _buildErrorState(
-    BuildContext context,
-  ) {
+  Widget _buildEmptyState() {
+    return _stateCard(
+      icon: Icons.hotel_outlined,
+      iconColor: WorldCompanionColors.oceanBlue,
+      title: 'No hotels available',
+      message:
+          'The existing backend did not return any hotel listings. '
+          'Try refreshing later.',
+      actionLabel: 'Refresh stays',
+      onAction: _loadHotels,
+    );
+  }
+
+  Widget _buildUnavailableCategory() {
+    final isHostel = _selectedCategory == 1;
+
+    return _stateCard(
+      icon: isHostel
+          ? Icons.groups_outlined
+          : Icons.bed_outlined,
+      iconColor: WorldCompanionColors.oceanBlue,
+      title: isHostel ? 'Hostels' : 'Dorms',
+      message:
+          'This category is coming soon. It is not connected to a '
+          'separate backend listing yet.',
+      actionLabel: 'Browse hotels',
+      onAction: () => _selectCategory(0),
+    );
+  }
+
+  Widget _stateCard({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String message,
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
     return Container(
       width: double.infinity,
-      padding:
-          const EdgeInsets.all(28),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
       decoration: BoxDecoration(
-        color:
-            Theme.of(context)
-                .colorScheme
-                .surface,
-        borderRadius:
-            BorderRadius.circular(22),
-        border: Border.all(
-          color:
-              const Color(0xFFDCE5E4),
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
         ),
+        border: Border.all(color: WorldCompanionColors.border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x060B2545),
+            blurRadius: 16,
+            offset: Offset(0, 5),
+          ),
+        ],
       ),
       child: Column(
         children: [
-          const Icon(
-            Icons
-                .cloud_off_outlined,
-            size: 48,
-            color: Color(
-              0xFFC94B4B,
-            ),
-          ),
-
-          const SizedBox(
-            height: 14,
-          ),
-
-          const Text(
-            'Unable to load hotels',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight:
-                  FontWeight.w700,
-            ),
-          ),
-
-          const SizedBox(
-            height: 6,
-          ),
-
-          const Text(
-            'Check the backend connection and try again.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(
-                0xFF68777B,
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: WorldCompanionColors.infoSurface,
+              borderRadius: BorderRadius.circular(
+                WorldCompanionRadius.large,
               ),
-              fontSize: 13,
             ),
+            child: Icon(icon, color: iconColor, size: 32),
           ),
-
-          const SizedBox(
-            height: 18,
+          const SizedBox(height: WorldCompanionSpacing.md),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: WorldCompanionTypography.textTheme.titleLarge,
           ),
-
+          const SizedBox(height: WorldCompanionSpacing.xs),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: WorldCompanionTypography.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: WorldCompanionSpacing.lg),
           OutlinedButton.icon(
-            onPressed: _loadHotels,
-            icon: const Icon(
-              Icons.refresh,
-            ),
-            label: const Text(
-              'Try again',
-            ),
+            onPressed: onAction,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(actionLabel),
           ),
         ],
       ),

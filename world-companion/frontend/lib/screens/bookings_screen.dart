@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
+import '../theme/world_companion_colors.dart';
+import '../theme/world_companion_elevation.dart';
+import '../theme/world_companion_radius.dart';
+import '../theme/world_companion_spacing.dart';
+import '../theme/world_companion_typography.dart';
 
 class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
@@ -10,18 +15,6 @@ class BookingsScreen extends StatefulWidget {
 }
 
 class _BookingsScreenState extends State<BookingsScreen> {
-  static const Color primary = Color(0xFF0E7774);
-  static const Color deep = Color(0xFF123B43);
-  static const Color aqua = Color(0xFFDFF4F1);
-  static const Color background = Color(0xFFF7F9F8);
-  static const Color surface = Color(0xFFFFFFFF);
-  static const Color ink = Color(0xFF172326);
-  static const Color muted = Color(0xFF68777B);
-  static const Color line = Color(0xFFDCE5E4);
-  static const Color success = Color(0xFF248A67);
-  static const Color warning = Color(0xFFB7791F);
-  static const Color error = Color(0xFFC94B4B);
-
   bool _loading = true;
   String? _error;
   List<dynamic> _bookings = [];
@@ -33,6 +26,8 @@ class _BookingsScreenState extends State<BookingsScreen> {
   }
 
   Future<void> _loadBookings() async {
+    if (!mounted) return;
+
     setState(() {
       _loading = true;
       _error = null;
@@ -76,20 +71,78 @@ class _BookingsScreenState extends State<BookingsScreen> {
   Color _statusColor(String status) {
     switch (status.toLowerCase()) {
       case 'confirmed':
-        return success;
+        return WorldCompanionColors.success;
       case 'pending':
-        return warning;
+        return WorldCompanionColors.warning;
       case 'cancelled':
       case 'canceled':
-        return error;
+        return WorldCompanionColors.error;
       default:
-        return muted;
+        return WorldCompanionColors.mutedText;
     }
   }
 
-  Widget _bookingCard(
-    Map<String, dynamic> booking,
-  ) {
+  Widget _statusBadge(String status) {
+    final color = _statusColor(status);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: WorldCompanionSpacing.sm,
+        vertical: WorldCompanionSpacing.xxs,
+      ),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.pill),
+      ),
+      child: Text(
+        status,
+        style: WorldCompanionTypography.textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _dateInfo({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              icon,
+              size: 15,
+              color: WorldCompanionColors.mutedText,
+            ),
+            const SizedBox(width: WorldCompanionSpacing.xxs),
+            Flexible(
+              child: Text(
+                label,
+                style: WorldCompanionTypography.textTheme.labelSmall,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: WorldCompanionSpacing.xs),
+        Text(
+          value.isEmpty ? 'Not available' : value,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: WorldCompanionTypography.textTheme.bodyMedium?.copyWith(
+            color: WorldCompanionColors.deepOcean,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _bookingCard(Map<String, dynamic> booking) {
     final hotelName = _value(
       booking,
       ['hotel_name', 'hotel', 'name'],
@@ -102,15 +155,8 @@ class _BookingsScreenState extends State<BookingsScreen> {
       fallback: 'Room',
     );
 
-    final checkIn = _value(
-      booking,
-      ['check_in', 'checkIn'],
-    );
-
-    final checkOut = _value(
-      booking,
-      ['check_out', 'checkOut'],
-    );
+    final checkIn = _value(booking, ['check_in', 'checkIn']);
+    final checkOut = _value(booking, ['check_out', 'checkOut']);
 
     final status = _value(
       booking,
@@ -123,20 +169,20 @@ class _BookingsScreenState extends State<BookingsScreen> {
       ['id', 'booking_id', 'uuid'],
     );
 
-    final statusColor = _statusColor(status);
-
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(18),
+      margin: const EdgeInsets.only(
+        bottom: WorldCompanionSpacing.md,
+      ),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.md),
       decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: line),
-        boxShadow: const [
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
+        border: Border.all(color: WorldCompanionColors.border),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x08123B43),
-            blurRadius: 14,
-            offset: Offset(0, 6),
+            color: WorldCompanionColors.deepOcean.withOpacity(0.035),
+            blurRadius: 16,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -147,116 +193,107 @@ class _BookingsScreenState extends State<BookingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 50,
-                height: 50,
+                width: 52,
+                height: 52,
                 decoration: BoxDecoration(
-                  color: aqua,
-                  borderRadius: BorderRadius.circular(15),
+                  color: WorldCompanionColors.infoSurface,
+                  borderRadius: BorderRadius.circular(
+                    WorldCompanionRadius.medium,
+                  ),
                 ),
                 child: const Icon(
                   Icons.hotel_rounded,
-                  color: primary,
+                  color: WorldCompanionColors.deepOcean,
                   size: 25,
                 ),
               ),
-
-              const SizedBox(width: 13),
-
+              const SizedBox(width: WorldCompanionSpacing.md),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       hotelName,
-                      style: const TextStyle(
-                        color: ink,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: WorldCompanionTypography.textTheme.titleMedium
+                          ?.copyWith(
+                        color: WorldCompanionColors.deepOcean,
                       ),
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: WorldCompanionSpacing.xxs),
                     Text(
                       roomType,
-                      style: const TextStyle(
-                        color: muted,
-                        fontSize: 13,
-                      ),
+                      style: WorldCompanionTypography.textTheme.bodyMedium,
                     ),
                   ],
                 ),
               ),
-
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 9,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  status,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
+              const SizedBox(width: WorldCompanionSpacing.xs),
+              Flexible(
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: _statusBadge(status),
                 ),
               ),
             ],
           ),
-
-          const SizedBox(height: 18),
-
+          const SizedBox(height: WorldCompanionSpacing.md),
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(WorldCompanionSpacing.md),
             decoration: BoxDecoration(
-              color: background,
-              borderRadius: BorderRadius.circular(14),
+              color: WorldCompanionColors.aiSurface,
+              borderRadius: BorderRadius.circular(
+                WorldCompanionRadius.medium,
+              ),
             ),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: _dateInfo(
-                    label: 'Check-in',
-                    value: checkIn.isEmpty
-                        ? 'Not available'
-                        : checkIn,
+                    icon: Icons.login_rounded,
+                    label: 'CHECK-IN',
+                    value: checkIn,
                   ),
                 ),
                 Container(
                   width: 1,
-                  height: 34,
-                  color: line,
+                  height: 48,
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: WorldCompanionSpacing.sm,
+                  ),
+                  color: WorldCompanionColors.border,
                 ),
                 Expanded(
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.only(left: 14),
-                    child: _dateInfo(
-                      label: 'Check-out',
-                      value: checkOut.isEmpty
-                          ? 'Not available'
-                          : checkOut,
-                    ),
+                  child: _dateInfo(
+                    icon: Icons.logout_rounded,
+                    label: 'CHECK-OUT',
+                    value: checkOut,
                   ),
                 ),
               ],
             ),
           ),
-
           if (bookingId.isNotEmpty) ...[
-            const SizedBox(height: 13),
-            Text(
-              'Booking ID: $bookingId',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: muted,
-                fontSize: 11,
-              ),
+            const SizedBox(height: WorldCompanionSpacing.sm),
+            Row(
+              children: [
+                const Icon(
+                  Icons.confirmation_number_outlined,
+                  size: 15,
+                  color: WorldCompanionColors.mutedText,
+                ),
+                const SizedBox(width: WorldCompanionSpacing.xxs),
+                Expanded(
+                  child: Text(
+                    'Booking ID: $bookingId',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: WorldCompanionTypography.textTheme.bodySmall,
+                  ),
+                ),
+              ],
             ),
           ],
         ],
@@ -264,69 +301,136 @@ class _BookingsScreenState extends State<BookingsScreen> {
     );
   }
 
-  Widget _dateInfo({
-    required String label,
-    required String value,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: muted,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-          ),
+  Widget _summaryCard() {
+    return Container(
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
+      decoration: BoxDecoration(
+        color: WorldCompanionColors.deepOcean,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
         ),
-        const SizedBox(height: 5),
-        Text(
-          value,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: ink,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -10,
+            top: -15,
+            child: Icon(
+              Icons.travel_explore_rounded,
+              size: 112,
+              color: Colors.white.withOpacity(0.06),
+            ),
           ),
-        ),
-      ],
+          Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(
+                    WorldCompanionRadius.medium,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.hotel_rounded,
+                  color: Colors.white,
+                  size: 27,
+                ),
+              ),
+              const SizedBox(width: WorldCompanionSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Your stays',
+                      style: WorldCompanionTypography.textTheme.headlineSmall
+                          ?.copyWith(color: Colors.white),
+                    ),
+                    const SizedBox(height: WorldCompanionSpacing.xxs),
+                    Text(
+                      'Your hotel reservations, all in one place.',
+                      style: WorldCompanionTypography.textTheme.bodyMedium
+                          ?.copyWith(
+                        color: Colors.white.withOpacity(0.78),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeading(String title, String subtitle) {
+    return Padding(
+      padding: const EdgeInsets.only(
+        top: WorldCompanionSpacing.xl,
+        bottom: WorldCompanionSpacing.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: WorldCompanionTypography.textTheme.headlineSmall,
+          ),
+          const SizedBox(height: WorldCompanionSpacing.xxs),
+          Text(
+            subtitle,
+            style: WorldCompanionTypography.textTheme.bodyMedium,
+          ),
+        ],
+      ),
     );
   }
 
   Widget _emptyState() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: line),
+      padding: const EdgeInsets.symmetric(
+        horizontal: WorldCompanionSpacing.lg,
+        vertical: WorldCompanionSpacing.xxl,
       ),
-      child: const Column(
+      decoration: BoxDecoration(
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
+        border: Border.all(color: WorldCompanionColors.border),
+      ),
+      child: Column(
         children: [
-          Icon(
-            Icons.hotel_outlined,
-            color: primary,
-            size: 44,
+          Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(
+              color: WorldCompanionColors.infoSurface,
+              borderRadius: BorderRadius.circular(
+                WorldCompanionRadius.extraLarge,
+              ),
+            ),
+            child: const Icon(
+              Icons.luggage_outlined,
+              color: WorldCompanionColors.deepOcean,
+              size: 36,
+            ),
           ),
-          SizedBox(height: 16),
+          const SizedBox(height: WorldCompanionSpacing.lg),
           Text(
             'No bookings yet',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: ink,
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-            ),
+            style: WorldCompanionTypography.textTheme.titleLarge,
           ),
-          SizedBox(height: 7),
+          const SizedBox(height: WorldCompanionSpacing.xs),
           Text(
             'Your hotel bookings will appear here after you make a reservation.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: muted,
-              fontSize: 13,
+            style: WorldCompanionTypography.textTheme.bodyMedium?.copyWith(
               height: 1.5,
             ),
           ),
@@ -335,153 +439,154 @@ class _BookingsScreenState extends State<BookingsScreen> {
     );
   }
 
+  Widget _errorState() {
+    return Container(
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
+      decoration: BoxDecoration(
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.large,
+        ),
+        border: Border.all(
+          color: WorldCompanionColors.error.withOpacity(0.3),
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: WorldCompanionColors.errorSurface,
+              borderRadius: BorderRadius.circular(
+                WorldCompanionRadius.medium,
+              ),
+            ),
+            child: const Icon(
+              Icons.cloud_off_rounded,
+              color: WorldCompanionColors.error,
+              size: 28,
+            ),
+          ),
+          const SizedBox(height: WorldCompanionSpacing.md),
+          Text(
+            'Could not load bookings',
+            textAlign: TextAlign.center,
+            style: WorldCompanionTypography.textTheme.titleMedium,
+          ),
+          const SizedBox(height: WorldCompanionSpacing.xs),
+          Text(
+            _error ?? 'Something went wrong.',
+            textAlign: TextAlign.center,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: WorldCompanionTypography.textTheme.bodySmall,
+          ),
+          const SizedBox(height: WorldCompanionSpacing.md),
+          FilledButton.icon(
+            onPressed: _loading ? null : _loadBookings,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Try again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _loadingState() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(
+        vertical: WorldCompanionSpacing.xxxl,
+      ),
+      child: Center(
+        child: CircularProgressIndicator(
+          color: WorldCompanionColors.deepOcean,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: WorldCompanionColors.softWhite,
       appBar: AppBar(
-        title: const Text('Bookings'),
-        backgroundColor: background,
-        foregroundColor: ink,
-        elevation: 0,
+        backgroundColor: WorldCompanionColors.softWhite,
+        foregroundColor: WorldCompanionColors.deepOcean,
+        surfaceTintColor: Colors.transparent,
+        elevation: WorldCompanionElevation.none,
+        title: Text(
+          'Bookings',
+          style: WorldCompanionTypography.textTheme.titleLarge,
+        ),
         actions: [
           IconButton(
+            tooltip: 'Refresh bookings',
             onPressed: _loading ? null : _loadBookings,
             icon: const Icon(Icons.refresh_rounded),
           ),
+          const SizedBox(width: WorldCompanionSpacing.xs),
         ],
       ),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _loadBookings,
-          color: primary,
+          color: WorldCompanionColors.deepOcean,
+          backgroundColor: WorldCompanionColors.surface,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(
+              WorldCompanionSpacing.mobilePage,
+              WorldCompanionSpacing.sm,
+              WorldCompanionSpacing.mobilePage,
+              WorldCompanionSpacing.xxxl,
+            ),
             children: [
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [
-                      deep,
-                      primary,
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 760),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _summaryCard(),
+                      if (!_loading && _error == null) ...[
+                        _sectionHeading(
+                          'Booking history',
+                          _bookings.isEmpty
+                              ? 'Your upcoming stays will show up here.'
+                              : '${_bookings.length} ${_bookings.length == 1 ? 'reservation' : 'reservations'} in your history.',
+                        ),
+                      ],
+                      if (_loading)
+                        _loadingState()
+                      else if (_error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            top: WorldCompanionSpacing.xl,
+                          ),
+                          child: _errorState(),
+                        )
+                      else if (_bookings.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            top: WorldCompanionSpacing.sm,
+                          ),
+                          child: _emptyState(),
+                        )
+                      else
+                        ..._bookings.map((booking) {
+                          if (booking is Map) {
+                            return _bookingCard(
+                              Map<String, dynamic>.from(booking),
+                            );
+                          }
+
+                          return const SizedBox.shrink();
+                        }),
                     ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
                   ),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.hotel_rounded,
-                      color: Colors.white,
-                      size: 30,
-                    ),
-                    SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Your stays',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 21,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          SizedBox(height: 5),
-                          Text(
-                            'View your WorldCompanion hotel booking history.',
-                            style: TextStyle(
-                              color: Color(0xD9FFFFFF),
-                              fontSize: 12,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
                 ),
               ),
-
-              const SizedBox(height: 24),
-
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 60),
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      color: primary,
-                    ),
-                  ),
-                )
-              else if (_error != null)
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: surface,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: error.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      const Icon(
-                        Icons.error_outline_rounded,
-                        color: error,
-                        size: 38,
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Could not load bookings',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: ink,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: muted,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      OutlinedButton.icon(
-                        onPressed: _loadBookings,
-                        icon: const Icon(
-                          Icons.refresh_rounded,
-                        ),
-                        label: const Text('Try again'),
-                      ),
-                    ],
-                  ),
-                )
-              else if (_bookings.isEmpty)
-                _emptyState()
-              else
-                ..._bookings.map(
-                  (booking) {
-                    if (booking is Map) {
-                      return _bookingCard(
-                        Map<String, dynamic>.from(booking),
-                      );
-                    }
-
-                    return const SizedBox.shrink();
-                  },
-                ),
             ],
           ),
         ),

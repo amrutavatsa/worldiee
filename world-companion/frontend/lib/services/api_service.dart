@@ -45,6 +45,24 @@ class ApiService {
     return Map<String, dynamic>.from(body["data"]);
   }
 
+  static Future<Map<String, dynamic>> googleLogin(
+    String idToken,
+  ) async {
+    final res = await http.post(
+      Uri.parse("$baseUrl/api/auth/google/"),
+      headers: await _headers(),
+      body: jsonEncode({
+        "id_token": idToken,
+      }),
+    );
+
+    _checkOk(res);
+
+    final body = jsonDecode(res.body);
+
+    return Map<String, dynamic>.from(body["data"]);
+  }
+
   // ---------------------------------------------------------------------------
   // Intent
   // ---------------------------------------------------------------------------
@@ -66,7 +84,7 @@ class ApiService {
   }
 
   // ---------------------------------------------------------------------------
-  // Route
+  // Route — Existing A* routing
   // ---------------------------------------------------------------------------
 
   static Future<Map<String, dynamic>> optimizeRoute(
@@ -85,6 +103,43 @@ class ApiService {
     _checkOk(res);
 
     return jsonDecode(res.body)["data"];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Route — Real-world road routing
+  //
+  // This is separate from the existing A* routing above.
+  // It uses the Django real-world routing endpoint, which calls Geoapify.
+  // ---------------------------------------------------------------------------
+
+  static Future<Map<String, dynamic>> getRealWorldRoute({
+    required double startLatitude,
+    required double startLongitude,
+    required double destinationLatitude,
+    required double destinationLongitude,
+    String mode = "drive",
+  }) async {
+    final res = await http.post(
+      Uri.parse(
+        "$baseUrl/api/routes/real-world/",
+      ),
+      headers: await _headers(),
+      body: jsonEncode({
+        "start_lat": startLatitude,
+        "start_lon": startLongitude,
+        "destination_lat": destinationLatitude,
+        "destination_lon": destinationLongitude,
+        "mode": mode,
+      }),
+    );
+
+    _checkOk(res);
+
+    final body = jsonDecode(res.body);
+
+    return Map<String, dynamic>.from(
+      body["data"],
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -117,6 +172,33 @@ class ApiService {
     _checkOk(res);
 
     return jsonDecode(res.body)["data"];
+  }
+
+  // ---------------------------------------------------------------------------
+  // AI Place Intelligence
+  //
+  // Generates grounded AI intelligence for a real-world place.
+  // The backend retrieves verified place data first and then sends
+  // that data to the WorldCompanion AI system.
+  // ---------------------------------------------------------------------------
+
+  static Future<Map<String, dynamic>> generatePlaceIntelligence({
+    required String placeId,
+  }) async {
+    final res = await http.post(
+      Uri.parse(
+        "$baseUrl/api/places/$placeId/ai/",
+      ),
+      headers: await _headers(),
+    );
+
+    _checkOk(res);
+
+    final body = jsonDecode(res.body);
+
+    return Map<String, dynamic>.from(
+      body["data"] ?? body,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -169,15 +251,25 @@ class ApiService {
   // ---------------------------------------------------------------------------
 
   static Future<List<dynamic>> getNearbyPlaces({
+    required double latitude,
+    required double longitude,
+    double radiusKm = 10.0,
     String? category,
   }) async {
+    final queryParameters = <String, String>{
+      "lat": latitude.toString(),
+      "lon": longitude.toString(),
+      "radius": radiusKm.toString(),
+    };
+
+    if (category != null && category.isNotEmpty) {
+      queryParameters["category"] = category;
+    }
+
     final uri = Uri.parse(
       "$baseUrl/api/places/nearby/",
     ).replace(
-      queryParameters: {
-        if (category != null && category.isNotEmpty)
-          "category": category,
-      },
+      queryParameters: queryParameters,
     );
 
     final res = await http.get(
@@ -187,7 +279,11 @@ class ApiService {
 
     _checkOk(res);
 
-    return jsonDecode(res.body)["data"];
+    final body = jsonDecode(res.body);
+
+    return List<dynamic>.from(
+      body["data"] ?? [],
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -315,6 +411,26 @@ class ApiService {
     return jsonDecode(res.body)["data"];
   }
 
+  // ---------------------------------------------------------------------------
+  // SOS — Get currently active event
+  //
+  // Returns the user's current countdown/active SOS event.
+  // Returns data: null when there is no active SOS.
+  // ---------------------------------------------------------------------------
+
+  static Future<Map<String, dynamic>> getActiveSos() async {
+    final res = await http.get(
+      Uri.parse("$baseUrl/api/sos/active/"),
+      headers: await _headers(),
+    );
+
+    _checkOk(res);
+
+    final body = jsonDecode(res.body);
+
+    return Map<String, dynamic>.from(body);
+  }
+
   static Future<Map<String, dynamic>> activateSos(
     String eventId,
   ) async {
@@ -437,13 +553,18 @@ class ApiService {
   // ---------------------------------------------------------------------------
 
   static Future<Map<String, dynamic>> sendAssistantMessage(
-    String message,
-  ) async {
+    String message, {
+    List<Map<String, dynamic>>? conversation,
+    bool confirmed = false,
+  }) async {
     final res = await http.post(
       Uri.parse("$baseUrl/api/assistant/"),
       headers: await _headers(),
       body: jsonEncode({
         "message": message,
+        "confirmed": confirmed,
+        if (conversation != null)
+          "conversation": conversation,
       }),
     );
 

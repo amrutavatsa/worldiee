@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
+import '../theme/world_companion_colors.dart';
+import '../theme/world_companion_elevation.dart';
+import '../theme/world_companion_motion.dart';
+import '../theme/world_companion_radius.dart';
+import '../theme/world_companion_spacing.dart';
+import '../theme/world_companion_typography.dart';
+import '../widgets/world_map.dart';
 
 class RouteScreen extends StatefulWidget {
   const RouteScreen({super.key});
@@ -11,7 +18,6 @@ class RouteScreen extends StatefulWidget {
 
 class _RouteScreenState extends State<RouteScreen> {
   Map<String, dynamic>? _pois;
-
   String? _startId;
 
   final Set<String> _selectedStops = {};
@@ -29,11 +35,12 @@ class _RouteScreenState extends State<RouteScreen> {
     _loadPois();
   }
 
-  // ===========================================================================
-  // LOAD POIS
-  // ===========================================================================
-
   Future<void> _loadPois() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
     try {
       final pois = await ApiService.getPois();
 
@@ -42,20 +49,31 @@ class _RouteScreenState extends State<RouteScreen> {
       if (pois.isEmpty) {
         setState(() {
           _pois = pois;
+          _startId = null;
+          _selectedStops.clear();
+          _routeResult = null;
           _loading = false;
           _error = 'No places are available for route planning.';
         });
-
         return;
       }
 
       setState(() {
         _pois = pois;
-        _startId = pois.keys.first;
+
+        if (_startId == null || !pois.containsKey(_startId)) {
+          _startId = pois.keys.first;
+        }
+
+        _selectedStops.removeWhere(
+          (id) => id == _startId || !pois.containsKey(id),
+        );
+
+        _routeResult = null;
         _loading = false;
         _error = null;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
 
       setState(() {
@@ -65,15 +83,9 @@ class _RouteScreenState extends State<RouteScreen> {
     }
   }
 
-  // ===========================================================================
-  // COMPUTE ROUTE
-  // ===========================================================================
-
   Future<void> _computeRoute() async {
     if (_startId == null || _selectedStops.isEmpty) {
-      _showMessage(
-        'Select at least one place to create a route.',
-      );
+      _showMessage('Select at least one place to create a route.');
       return;
     }
 
@@ -94,7 +106,7 @@ class _RouteScreenState extends State<RouteScreen> {
       setState(() {
         _routeResult = result;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
 
       setState(() {
@@ -109,27 +121,16 @@ class _RouteScreenState extends State<RouteScreen> {
     }
   }
 
-  // ===========================================================================
-  // STARTING POINT CHANGE
-  // ===========================================================================
-
   void _changeStartPoint(String? value) {
-    if (value == null) return;
+    if (value == null || value == _startId) return;
 
     setState(() {
       _startId = value;
-
-      // A place cannot be both the starting point and a selected stop.
       _selectedStops.remove(value);
-
-      // Clear previous route because the input has changed.
       _routeResult = null;
+      _error = null;
     });
   }
-
-  // ===========================================================================
-  // STOP SELECTION
-  // ===========================================================================
 
   void _toggleStop(String placeId, bool selected) {
     setState(() {
@@ -139,31 +140,25 @@ class _RouteScreenState extends State<RouteScreen> {
         _selectedStops.remove(placeId);
       }
 
-      // Previous result no longer represents the current selection.
       _routeResult = null;
+      _error = null;
     });
   }
-
-  // ===========================================================================
-  // MESSAGE
-  // ===========================================================================
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: const Color(0xFF123B43),
+        backgroundColor: WorldCompanionColors.deepOcean,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(
+            WorldCompanionRadius.medium,
+          ),
         ),
         content: Text(message),
       ),
     );
   }
-
-  // ===========================================================================
-  // BUILD
-  // ===========================================================================
 
   @override
   Widget build(BuildContext context) {
@@ -172,24 +167,18 @@ class _RouteScreenState extends State<RouteScreen> {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text(
-          'Route Planner',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-          ),
+        title: Text(
+          'Route planner',
+          style: WorldCompanionTypography.textTheme.titleLarge,
         ),
         backgroundColor: theme.scaffoldBackgroundColor,
-        foregroundColor: const Color(0xFF172326),
-        elevation: 0,
-        scrolledUnderElevation: 0,
+        foregroundColor: WorldCompanionColors.primaryText,
+        elevation: WorldCompanionElevation.none,
+        scrolledUnderElevation: WorldCompanionElevation.none,
       ),
       body: _buildBody(theme),
     );
   }
-
-  // ===========================================================================
-  // BODY
-  // ===========================================================================
 
   Widget _buildBody(ThemeData theme) {
     if (_loading) {
@@ -204,18 +193,96 @@ class _RouteScreenState extends State<RouteScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 800;
+        final isWide = constraints.maxWidth >= 900;
+        final pagePadding = constraints.maxWidth >= 1200
+            ? WorldCompanionSpacing.desktopPage
+            : constraints.maxWidth >= 700
+                ? WorldCompanionSpacing.tabletPage
+                : WorldCompanionSpacing.mobilePage;
 
         return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+          padding: EdgeInsets.fromLTRB(
+            pagePadding,
+            WorldCompanionSpacing.md,
+            pagePadding,
+            WorldCompanionSpacing.xxxl,
+          ),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: 1100,
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHeader(theme),
+                  const SizedBox(height: WorldCompanionSpacing.lg),
+                  if (isWide) ...[
+                    _buildMapSection(),
+                    const SizedBox(height: WorldCompanionSpacing.lg),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 5,
+                          child: Column(
+                            children: [
+                              _buildStartPointCard(theme),
+                              const SizedBox(
+                                height: WorldCompanionSpacing.md,
+                              ),
+                              _buildStopsCard(theme),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(
+                          width: WorldCompanionSpacing.lg,
+                        ),
+                        Expanded(
+                          flex: 4,
+                          child: Column(
+                            children: [
+                              _buildRouteSummaryCard(theme),
+                              const SizedBox(
+                                height: WorldCompanionSpacing.md,
+                              ),
+                              _buildComputeButton(),
+                              if (_error != null) ...[
+                                const SizedBox(
+                                  height: WorldCompanionSpacing.md,
+                                ),
+                                _buildErrorBanner(),
+                              ],
+                              if (_routeResult != null) ...[
+                                const SizedBox(
+                                  height: WorldCompanionSpacing.md,
+                                ),
+                                _buildRouteResult(theme),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    _buildMapSection(),
+                    const SizedBox(height: WorldCompanionSpacing.lg),
+                    _buildStartPointCard(theme),
+                    const SizedBox(height: WorldCompanionSpacing.md),
+                    _buildStopsCard(theme),
+                    const SizedBox(height: WorldCompanionSpacing.md),
+                    _buildRouteSummaryCard(theme),
+                    const SizedBox(height: WorldCompanionSpacing.md),
+                    _buildComputeButton(),
+                    if (_error != null) ...[
+                      const SizedBox(height: WorldCompanionSpacing.md),
+                      _buildErrorBanner(),
+                    ],
+                    if (_routeResult != null) ...[
+                      const SizedBox(height: WorldCompanionSpacing.lg),
+                      _buildRouteResult(theme),
+                    ],
+                  ],
+                ],
               ),
-              child: isWide
-                  ? _buildWideLayout(theme)
-                  : _buildMobileLayout(theme),
             ),
           ),
         );
@@ -223,114 +290,56 @@ class _RouteScreenState extends State<RouteScreen> {
     );
   }
 
-  // ===========================================================================
-  // MOBILE LAYOUT
-  // ===========================================================================
-
-  Widget _buildMobileLayout(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildHeader(theme),
-        const SizedBox(height: 24),
-        _buildStartPointCard(theme),
-        const SizedBox(height: 20),
-        _buildStopsCard(theme),
-        const SizedBox(height: 20),
-        _buildComputeButton(theme),
-        if (_error != null) ...[
-          const SizedBox(height: 16),
-          _buildErrorBanner(),
-        ],
-        if (_routeResult != null) ...[
-          const SizedBox(height: 24),
-          _buildRouteResult(theme),
-        ],
-      ],
-    );
-  }
-
-  // ===========================================================================
-  // WIDE LAYOUT
-  // ===========================================================================
-
-  Widget _buildWideLayout(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildHeader(theme),
-        const SizedBox(height: 28),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              flex: 4,
-              child: Column(
-                children: [
-                  _buildStartPointCard(theme),
-                  const SizedBox(height: 20),
-                  _buildStopsCard(theme),
-                ],
-              ),
-            ),
-            const SizedBox(width: 24),
-            Expanded(
-              flex: 5,
-              child: Column(
-                children: [
-                  _buildRouteSummaryCard(theme),
-                  const SizedBox(height: 20),
-                  _buildComputeButton(theme),
-                  if (_error != null) ...[
-                    const SizedBox(height: 16),
-                    _buildErrorBanner(),
-                  ],
-                  if (_routeResult != null) ...[
-                    const SizedBox(height: 20),
-                    _buildRouteResult(theme),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  // ===========================================================================
-  // HEADER
-  // ===========================================================================
-
   Widget _buildHeader(ThemeData theme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Plan your route',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: const Color(0xFF172326),
+          'Plan your next journey',
+          style: WorldCompanionTypography.editorial.copyWith(
+            fontSize: 32,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: WorldCompanionSpacing.xs),
         Text(
-          'Choose where you want to start and the places you want to visit.',
+          'Choose a starting point, select the places you want to visit, '
+          'and calculate your optimized route.',
           style: theme.textTheme.bodyMedium?.copyWith(
-            height: 1.5,
-            color: const Color(0xFF68777B),
+            height: 1.6,
           ),
         ),
       ],
     );
   }
 
-  // ===========================================================================
-  // STARTING POINT CARD
-  // ===========================================================================
+  Widget _buildMapSection() {
+    return Container(
+      width: double.infinity,
+      height: 360,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: WorldCompanionColors.mapSurface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
+        border: Border.all(
+          color: WorldCompanionColors.border,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: WorldCompanionColors.deepOcean.withOpacity(0.06),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: const WorldMap(),
+    );
+  }
 
   Widget _buildStartPointCard(ThemeData theme) {
-    final currentStart = _pois![_startId];
+    final pois = _pois!;
+    final currentStart = _startId == null ? null : pois[_startId];
 
     return _SectionCard(
       child: Column(
@@ -339,18 +348,21 @@ class _RouteScreenState extends State<RouteScreen> {
           _buildSectionTitle(
             icon: Icons.trip_origin_rounded,
             title: 'Starting point',
+            subtitle: 'Where your journey begins',
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: WorldCompanionSpacing.md),
           Container(
             padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 4,
+              horizontal: WorldCompanionSpacing.md,
+              vertical: WorldCompanionSpacing.xxs,
             ),
             decoration: BoxDecoration(
-              color: const Color(0xFFF7F9F8),
-              borderRadius: BorderRadius.circular(16),
+              color: WorldCompanionColors.aiSurface,
+              borderRadius: BorderRadius.circular(
+                WorldCompanionRadius.medium,
+              ),
               border: Border.all(
-                color: const Color(0xFFDCE5E4),
+                color: WorldCompanionColors.border,
               ),
             ),
             child: DropdownButtonHideUnderline(
@@ -359,24 +371,22 @@ class _RouteScreenState extends State<RouteScreen> {
                 isExpanded: true,
                 icon: const Icon(
                   Icons.keyboard_arrow_down_rounded,
-                  color: Color(0xFF0E7774),
+                  color: WorldCompanionColors.oceanBlue,
                 ),
-                items: _pois!.entries.map((entry) {
-                  final place = Map<String, dynamic>.from(
-                    entry.value,
-                  );
-
-                  final name =
-                      place['name']?.toString() ?? entry.key;
+                borderRadius: BorderRadius.circular(
+                  WorldCompanionRadius.medium,
+                ),
+                items: pois.entries.map((entry) {
+                  final place = _asStringMap(entry.value);
+                  final name = place['name']?.toString() ?? entry.key;
 
                   return DropdownMenuItem<String>(
                     value: entry.key,
                     child: Text(
                       name,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: theme.textTheme.bodyLarge?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF172326),
                       ),
                     ),
                   );
@@ -386,24 +396,19 @@ class _RouteScreenState extends State<RouteScreen> {
             ),
           ),
           if (currentStart is Map) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: WorldCompanionSpacing.sm),
             Row(
               children: [
                 const Icon(
                   Icons.location_on_outlined,
-                  size: 17,
-                  color: Color(0xFF68777B),
+                  size: 18,
+                  color: WorldCompanionColors.mutedText,
                 ),
-                const SizedBox(width: 7),
+                const SizedBox(width: WorldCompanionSpacing.xs),
                 Expanded(
                   child: Text(
-                    currentStart['category']?.toString() ??
-                        'Destination',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF68777B),
-                    ),
+                    currentStart['category']?.toString() ?? 'Destination',
+                    style: theme.textTheme.bodySmall,
                   ),
                 ),
               ],
@@ -413,10 +418,6 @@ class _RouteScreenState extends State<RouteScreen> {
       ),
     );
   }
-
-  // ===========================================================================
-  // STOPS CARD
-  // ===========================================================================
 
   Widget _buildStopsCard(ThemeData theme) {
     final availableStops = _pois!.entries
@@ -433,135 +434,108 @@ class _RouteScreenState extends State<RouteScreen> {
                 child: _buildSectionTitle(
                   icon: Icons.place_outlined,
                   title: 'Places to visit',
+                  subtitle: 'Add one or more stops',
                 ),
               ),
-              if (_selectedStops.isNotEmpty)
-                _buildSelectionBadge(),
+              if (_selectedStops.isNotEmpty) _buildSelectionBadge(),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: WorldCompanionSpacing.sm),
           Text(
-            'Select one or more places for your optimized route.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF68777B),
-              height: 1.4,
-            ),
+            'Select the destinations you want included in your route.',
+            style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: WorldCompanionSpacing.md),
           if (availableStops.isEmpty)
-            const Text(
+            Text(
               'No additional places are available.',
-              style: TextStyle(
-                color: Color(0xFF68777B),
-              ),
+              style: theme.textTheme.bodyMedium,
             )
           else
-            ...availableStops.map(
-              (entry) => _buildStopTile(entry),
-            ),
+            ...availableStops.map(_buildStopTile),
         ],
       ),
     );
   }
 
-  // ===========================================================================
-  // STOP TILE
-  // ===========================================================================
+  Widget _buildStopTile(MapEntry<String, dynamic> entry) {
+    final place = _asStringMap(entry.value);
+    final name = place['name']?.toString() ?? entry.key;
+    final category = place['category']?.toString() ?? 'Place';
+    final isSelected = _selectedStops.contains(entry.key);
 
-  Widget _buildStopTile(
-    MapEntry<String, dynamic> entry,
-  ) {
-    final place = Map<String, dynamic>.from(entry.value);
-
-    final name =
-        place['name']?.toString() ?? entry.key;
-
-    final category =
-        place['category']?.toString() ?? 'Place';
-
-    final isSelected =
-        _selectedStops.contains(entry.key);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+    return AnimatedContainer(
+      duration: WorldCompanionMotion.fast,
+      curve: WorldCompanionMotion.standardCurve,
+      margin: const EdgeInsets.only(
+        bottom: WorldCompanionSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: isSelected
-            ? const Color(0xFFDFF4F1)
-            : const Color(0xFFF7F9F8),
-        borderRadius: BorderRadius.circular(16),
+            ? WorldCompanionColors.infoSurface
+            : WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.medium,
+        ),
         border: Border.all(
           color: isSelected
-              ? const Color(0xFF0E7774).withOpacity(0.28)
-              : const Color(0xFFDCE5E4),
+              ? WorldCompanionColors.oceanBlue
+              : WorldCompanionColors.border,
         ),
       ),
       child: CheckboxListTile(
         value: isSelected,
-        onChanged: (checked) {
-          _toggleStop(
-            entry.key,
-            checked ?? false,
-          );
-        },
+        onChanged: _computingRoute
+            ? null
+            : (checked) => _toggleStop(
+                  entry.key,
+                  checked ?? false,
+                ),
         controlAffinity: ListTileControlAffinity.leading,
-        activeColor: const Color(0xFF0E7774),
+        activeColor: WorldCompanionColors.oceanBlue,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 2,
+          horizontal: WorldCompanionSpacing.sm,
+          vertical: WorldCompanionSpacing.xxs,
         ),
         title: Text(
           name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF172326),
-          ),
+          style: WorldCompanionTypography.textTheme.titleSmall,
         ),
         subtitle: Padding(
-          padding: const EdgeInsets.only(top: 3),
+          padding: const EdgeInsets.only(
+            top: WorldCompanionSpacing.xxs,
+          ),
           child: Text(
             _formatCategory(category),
-            style: const TextStyle(
-              fontSize: 12,
-              color: Color(0xFF68777B),
-              fontWeight: FontWeight.w500,
-            ),
+            style: WorldCompanionTypography.textTheme.bodySmall,
           ),
         ),
       ),
     );
   }
-
-  // ===========================================================================
-  // SELECTION BADGE
-  // ===========================================================================
 
   Widget _buildSelectionBadge() {
     return Container(
       padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
+        horizontal: WorldCompanionSpacing.sm,
+        vertical: WorldCompanionSpacing.xs,
       ),
       decoration: BoxDecoration(
-        color: const Color(0xFFDFF4F1),
-        borderRadius: BorderRadius.circular(30),
+        color: WorldCompanionColors.infoSurface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.pill,
+        ),
       ),
       child: Text(
         '${_selectedStops.length} selected',
-        style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF0E7774),
+        style: WorldCompanionTypography.textTheme.labelMedium?.copyWith(
+          color: WorldCompanionColors.oceanBlue,
         ),
       ),
     );
   }
-
-  // ===========================================================================
-  // ROUTE SUMMARY
-  // ===========================================================================
 
   Widget _buildRouteSummaryCard(ThemeData theme) {
     return _SectionCard(
@@ -571,22 +545,23 @@ class _RouteScreenState extends State<RouteScreen> {
           _buildSectionTitle(
             icon: Icons.route_rounded,
             title: 'Route summary',
+            subtitle: 'Your current selections',
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: WorldCompanionSpacing.md),
           Row(
             children: [
               Expanded(
                 child: _SummaryItem(
                   icon: Icons.trip_origin_rounded,
-                  label: 'Start',
+                  label: 'Starting point',
                   value: _getPlaceName(_startId),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: WorldCompanionSpacing.sm),
               Expanded(
                 child: _SummaryItem(
                   icon: Icons.flag_outlined,
-                  label: 'Stops',
+                  label: 'Selected stops',
                   value: '${_selectedStops.length}',
                 ),
               ),
@@ -597,17 +572,11 @@ class _RouteScreenState extends State<RouteScreen> {
     );
   }
 
-  // ===========================================================================
-  // COMPUTE BUTTON
-  // ===========================================================================
-
-  Widget _buildComputeButton(ThemeData theme) {
+  Widget _buildComputeButton() {
     return SizedBox(
       width: double.infinity,
       child: FilledButton.icon(
-        onPressed: _computingRoute
-            ? null
-            : _computeRoute,
+        onPressed: _computingRoute ? null : _computeRoute,
         icon: _computingRoute
             ? const SizedBox(
                 width: 18,
@@ -617,46 +586,35 @@ class _RouteScreenState extends State<RouteScreen> {
                   color: Colors.white,
                 ),
               )
-            : const Icon(
-                Icons.alt_route_rounded,
-              ),
+            : const Icon(Icons.alt_route_rounded),
         label: Text(
           _computingRoute
               ? 'Calculating route...'
               : 'Compute optimized route',
         ),
         style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFF0E7774),
+          backgroundColor: WorldCompanionColors.oceanBlue,
           foregroundColor: Colors.white,
-          disabledBackgroundColor:
-              const Color(0xFF9BB9B7),
+          disabledBackgroundColor: WorldCompanionColors.softBlue,
           padding: const EdgeInsets.symmetric(
-            vertical: 16,
-            horizontal: 20,
+            vertical: WorldCompanionSpacing.md,
+            horizontal: WorldCompanionSpacing.lg,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(
+              WorldCompanionRadius.medium,
+            ),
           ),
-          textStyle: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
+          textStyle: WorldCompanionTypography.textTheme.labelLarge,
         ),
       ),
     );
   }
 
-  // ===========================================================================
-  // ROUTE RESULT
-  // ===========================================================================
-
   Widget _buildRouteResult(ThemeData theme) {
     final result = _routeResult!;
-
     final distance = result['total_distance_km'];
-
     final rawHops = result['hops'];
-
     final hops = rawHops is List ? rawHops : <dynamic>[];
 
     return _SectionCard(
@@ -664,41 +622,43 @@ class _RouteScreenState extends State<RouteScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: _buildSectionTitle(
                   icon: Icons.check_circle_outline_rounded,
                   title: 'Optimized route',
+                  subtitle: 'Your calculated journey',
                 ),
               ),
               if (distance != null)
                 Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 11,
-                    vertical: 7,
+                    horizontal: WorldCompanionSpacing.sm,
+                    vertical: WorldCompanionSpacing.xs,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF1EC),
-                    borderRadius: BorderRadius.circular(30),
+                    color: WorldCompanionColors.successSurface,
+                    borderRadius: BorderRadius.circular(
+                      WorldCompanionRadius.pill,
+                    ),
                   ),
                   child: Text(
                     '${_formatDistance(distance)} km',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFF27C4A),
+                    style: WorldCompanionTypography
+                        .textTheme.labelMedium
+                        ?.copyWith(
+                      color: WorldCompanionColors.success,
                     ),
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: WorldCompanionSpacing.lg),
           if (hops.isEmpty)
-            const Text(
+            Text(
               'No route steps were returned.',
-              style: TextStyle(
-                color: Color(0xFF68777B),
-              ),
+              style: theme.textTheme.bodyMedium,
             )
           else
             ...List.generate(
@@ -714,56 +674,41 @@ class _RouteScreenState extends State<RouteScreen> {
     );
   }
 
-  // ===========================================================================
-  // ROUTE HOP
-  // ===========================================================================
-
-  Widget _buildHop(
-    dynamic rawHop,
-    int index,
-    int totalHops,
-  ) {
+  Widget _buildHop(dynamic rawHop, int index, int totalHops) {
     if (rawHop is! Map) {
       return const SizedBox.shrink();
     }
 
     final hop = Map<String, dynamic>.from(rawHop);
-
-    final fromName =
-        hop['from_name']?.toString() ?? 'Starting point';
-
-    final toName =
-        hop['to_name']?.toString() ?? 'Destination';
-
+    final fromName = hop['from_name']?.toString() ?? 'Starting point';
+    final toName = hop['to_name']?.toString() ?? 'Destination';
     final distance = hop['distance_km'];
-
     final isLast = index == totalHops - 1;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 28,
+          width: 30,
           child: Column(
             children: [
               Container(
-                width: 26,
-                height: 26,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
                   color: index == 0
-                      ? const Color(0xFF0E7774)
-                      : const Color(0xFFDFF4F1),
+                      ? WorldCompanionColors.oceanBlue
+                      : WorldCompanionColors.infoSurface,
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
                 child: Text(
                   '${index + 1}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
+                  style: WorldCompanionTypography.textTheme.labelMedium
+                      ?.copyWith(
                     color: index == 0
                         ? Colors.white
-                        : const Color(0xFF0E7774),
+                        : WorldCompanionColors.oceanBlue,
                   ),
                 ),
               ),
@@ -772,62 +717,75 @@ class _RouteScreenState extends State<RouteScreen> {
                   width: 2,
                   height: 42,
                   margin: const EdgeInsets.symmetric(
-                    vertical: 4,
+                    vertical: WorldCompanionSpacing.xxs,
                   ),
-                  color: const Color(0xFFDCE5E4),
+                  color: WorldCompanionColors.border,
                 ),
             ],
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: WorldCompanionSpacing.sm),
         Expanded(
           child: Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.only(
+              bottom: WorldCompanionSpacing.md,
+            ),
+            padding: const EdgeInsets.all(
+              WorldCompanionSpacing.md,
+            ),
             decoration: BoxDecoration(
-              color: const Color(0xFFF7F9F8),
-              borderRadius: BorderRadius.circular(16),
+              color: WorldCompanionColors.aiSurface,
+              borderRadius: BorderRadius.circular(
+                WorldCompanionRadius.large,
+              ),
+              border: Border.all(
+                color: WorldCompanionColors.border,
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   fromName,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF68777B),
-                  ),
+                  style: WorldCompanionTypography.textTheme.bodySmall,
                 ),
                 const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 4),
+                  padding: EdgeInsets.symmetric(
+                    vertical: WorldCompanionSpacing.xs,
+                  ),
                   child: Icon(
                     Icons.south_rounded,
-                    size: 16,
-                    color: Color(0xFF0E7774),
+                    size: 17,
+                    color: WorldCompanionColors.oceanBlue,
                   ),
                 ),
                 Text(
                   toName,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF172326),
-                  ),
+                  style: WorldCompanionTypography.textTheme.titleSmall,
                 ),
                 if (distance != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '${_formatDistance(distance)} km',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF0E7774),
-                    ),
+                  const SizedBox(height: WorldCompanionSpacing.sm),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.straighten_rounded,
+                        size: 15,
+                        color: WorldCompanionColors.mutedText,
+                      ),
+                      const SizedBox(width: WorldCompanionSpacing.xs),
+                      Text(
+                        '${_formatDistance(distance)} km',
+                        style: WorldCompanionTypography
+                            .textTheme.labelMedium
+                            ?.copyWith(
+                          color: WorldCompanionColors.oceanBlue,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],
@@ -838,61 +796,46 @@ class _RouteScreenState extends State<RouteScreen> {
     );
   }
 
-  // ===========================================================================
-  // ERROR STATE
-  // ===========================================================================
-
   Widget _buildErrorState() {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(
+          WorldCompanionSpacing.xl,
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 64,
-              height: 64,
+              width: 68,
+              height: 68,
               decoration: BoxDecoration(
-                color: const Color(0xFFFFF1EC),
-                borderRadius: BorderRadius.circular(20),
+                color: WorldCompanionColors.errorSurface,
+                borderRadius: BorderRadius.circular(
+                  WorldCompanionRadius.extraLarge,
+                ),
               ),
               child: const Icon(
                 Icons.route_outlined,
-                size: 30,
-                color: Color(0xFFF27C4A),
+                size: 32,
+                color: WorldCompanionColors.error,
               ),
             ),
-            const SizedBox(height: 18),
-            const Text(
+            const SizedBox(height: WorldCompanionSpacing.lg),
+            Text(
               'Route planning unavailable',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF172326),
-              ),
+              style: WorldCompanionTypography.textTheme.headlineSmall,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: WorldCompanionSpacing.xs),
             Text(
-              _error ??
-                  'Unable to load places for route planning.',
+              _error ?? 'Unable to load places for route planning.',
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 14,
-                height: 1.5,
-                color: Color(0xFF68777B),
-              ),
+              style: WorldCompanionTypography.textTheme.bodyMedium
+                  ?.copyWith(height: 1.6),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: WorldCompanionSpacing.lg),
             OutlinedButton.icon(
-              onPressed: () {
-                setState(() {
-                  _loading = true;
-                  _error = null;
-                });
-
-                _loadPois();
-              },
+              onPressed: _loading ? null : _loadPois,
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Try again'),
             ),
@@ -902,19 +845,19 @@ class _RouteScreenState extends State<RouteScreen> {
     );
   }
 
-  // ===========================================================================
-  // ERROR BANNER
-  // ===========================================================================
-
   Widget _buildErrorBanner() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(
+        WorldCompanionSpacing.md,
+      ),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF1EC),
-        borderRadius: BorderRadius.circular(16),
+        color: WorldCompanionColors.errorSurface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.medium,
+        ),
         border: Border.all(
-          color: const Color(0xFFF27C4A).withOpacity(0.25),
+          color: WorldCompanionColors.error.withOpacity(0.22),
         ),
       ),
       child: Row(
@@ -922,17 +865,17 @@ class _RouteScreenState extends State<RouteScreen> {
         children: [
           const Icon(
             Icons.info_outline_rounded,
-            color: Color(0xFFF27C4A),
+            color: WorldCompanionColors.error,
             size: 20,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: WorldCompanionSpacing.sm),
           Expanded(
             child: Text(
               _error!,
-              style: const TextStyle(
-                fontSize: 13,
-                height: 1.4,
-                color: Color(0xFF6B3D2C),
+              style: WorldCompanionTypography.textTheme.bodySmall
+                  ?.copyWith(
+                color: WorldCompanionColors.error,
+                height: 1.5,
               ),
             ),
           ),
@@ -941,47 +884,51 @@ class _RouteScreenState extends State<RouteScreen> {
     );
   }
 
-  // ===========================================================================
-  // SECTION TITLE
-  // ===========================================================================
-
   Widget _buildSectionTitle({
     required IconData icon,
     required String title,
+    String? subtitle,
   }) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 38,
-          height: 38,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            color: const Color(0xFFDFF4F1),
-            borderRadius: BorderRadius.circular(12),
+            color: WorldCompanionColors.infoSurface,
+            borderRadius: BorderRadius.circular(
+              WorldCompanionRadius.medium,
+            ),
           ),
           child: Icon(
             icon,
-            size: 20,
-            color: const Color(0xFF0E7774),
+            size: 21,
+            color: WorldCompanionColors.oceanBlue,
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: WorldCompanionSpacing.sm),
         Expanded(
-          child: Text(
-            title,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF172326),
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: WorldCompanionTypography.textTheme.titleMedium,
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: WorldCompanionSpacing.xxs),
+                Text(
+                  subtitle,
+                  style: WorldCompanionTypography.textTheme.bodySmall,
+                ),
+              ],
+            ],
           ),
         ),
       ],
     );
   }
-
-  // ===========================================================================
-  // HELPERS
-  // ===========================================================================
 
   String _getPlaceName(String? id) {
     if (id == null || _pois == null) {
@@ -998,57 +945,55 @@ class _RouteScreenState extends State<RouteScreen> {
   }
 
   String _formatCategory(String value) {
-    if (value.isEmpty) {
-      return 'Place';
-    }
+    if (value.isEmpty) return 'Place';
 
     return value[0].toUpperCase() + value.substring(1);
   }
 
   String _formatDistance(dynamic value) {
-    if (value == null) {
-      return '0';
-    }
+    if (value == null) return '0';
 
     final number = double.tryParse(value.toString());
 
-    if (number == null) {
-      return value.toString();
-    }
+    if (number == null) return value.toString();
 
     return number.toStringAsFixed(
       number == number.roundToDouble() ? 0 : 2,
     );
   }
-}
 
-// =============================================================================
-// SECTION CARD
-// =============================================================================
+  Map<String, dynamic> _asStringMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return <String, dynamic>{};
+  }
+}
 
 class _SectionCard extends StatelessWidget {
   final Widget child;
 
-  const _SectionCard({
-    required this.child,
-  });
+  const _SectionCard({required this.child});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(
+        WorldCompanionSpacing.lg,
+      ),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
         border: Border.all(
-          color: const Color(0xFFDCE5E4),
+          color: WorldCompanionColors.border,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.035),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
+            color: WorldCompanionColors.deepOcean.withOpacity(0.035),
+            blurRadius: 20,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -1056,10 +1001,6 @@ class _SectionCard extends StatelessWidget {
     );
   }
 }
-
-// =============================================================================
-// SUMMARY ITEM
-// =============================================================================
 
 class _SummaryItem extends StatelessWidget {
   final IconData icon;
@@ -1075,38 +1016,38 @@ class _SummaryItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      constraints: const BoxConstraints(minHeight: 112),
+      padding: const EdgeInsets.all(
+        WorldCompanionSpacing.md,
+      ),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F9F8),
-        borderRadius: BorderRadius.circular(16),
+        color: WorldCompanionColors.aiSurface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.large,
+        ),
+        border: Border.all(
+          color: WorldCompanionColors.border,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
             icon,
-            size: 19,
-            color: const Color(0xFF0E7774),
+            size: 20,
+            color: WorldCompanionColors.oceanBlue,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: WorldCompanionSpacing.sm),
           Text(
             label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF68777B),
-            ),
+            style: WorldCompanionTypography.textTheme.labelMedium,
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: WorldCompanionSpacing.xs),
           Text(
             value,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF172326),
-            ),
+            style: WorldCompanionTypography.textTheme.titleSmall,
           ),
         ],
       ),

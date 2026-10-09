@@ -1,12 +1,50 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../services/api_service.dart';
+import '../theme/world_companion_colors.dart';
+import '../theme/world_companion_elevation.dart';
+import '../theme/world_companion_motion.dart';
+import '../theme/world_companion_radius.dart';
+import '../theme/world_companion_spacing.dart';
+import '../theme/world_companion_typography.dart';
 import 'home_screen.dart';
 import 'explore_screens.dart';
 import 'trip_screen.dart';
 import 'stays_screen.dart';
 import 'profile_screen.dart';
+
+class AppShellNavigation extends InheritedWidget {
+  const AppShellNavigation({
+    super.key,
+    required this.goHome,
+    required super.child,
+  });
+
+  final VoidCallback goHome;
+
+  static AppShellNavigation? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<AppShellNavigation>();
+  }
+
+  static AppShellNavigation of(BuildContext context) {
+    final navigation = maybeOf(context);
+
+    assert(
+      navigation != null,
+      'AppShellNavigation was not found in the widget tree.',
+    );
+
+    return navigation!;
+  }
+
+  @override
+  bool updateShouldNotify(AppShellNavigation oldWidget) {
+    return goHome != oldWidget.goHome;
+  }
+}
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -16,145 +54,326 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  int _selectedIndex = 0;
+  static const int _homeIndex = 0;
+  static const int _exploreIndex = 1;
+  static const int _tripsIndex = 2;
+  static const int _staysIndex = 3;
+  static const int _profileIndex = 4;
+  static const int _destinationCount = 5;
+
+  int _selectedIndex = _homeIndex;
   bool _isAiOpen = false;
 
-  static const Color primary = Color(0xFF0E7774);
-  static const Color deep = Color(0xFF123B43);
-  static const Color aqua = Color(0xFFDFF4F1);
-  static const Color surface = Color(0xFFFFFFFF);
+  // Screens are created only when the user first opens them.
+  // This prevents off-screen pages from initializing at app startup.
+  late final List<Widget?> _screens = List<Widget?>.filled(
+    _destinationCount,
+    null,
+  )..[_homeIndex] = const HomeScreen();
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    ExploreScreen(),
-    TripsScreen(),
-    StaysScreen(),
-    ProfileScreen(),
+  static const List<NavigationDestination> _destinations = [
+    NavigationDestination(
+      icon: Icon(Icons.home_outlined),
+      selectedIcon: Icon(Icons.home_rounded),
+      label: 'Home',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.explore_outlined),
+      selectedIcon: Icon(Icons.explore_rounded),
+      label: 'Explore',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.map_outlined),
+      selectedIcon: Icon(Icons.map_rounded),
+      label: 'Trips',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.hotel_outlined),
+      selectedIcon: Icon(Icons.hotel_rounded),
+      label: 'Stay',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.person_outline_rounded),
+      selectedIcon: Icon(Icons.person_rounded),
+      label: 'Profile',
+    ),
   ];
 
-  void _onDestinationSelected(int index) {
-    if (index == _selectedIndex) {
-      return;
+  static const List<NavigationRailDestination> _railDestinations = [
+    NavigationRailDestination(
+      icon: Icon(Icons.home_outlined),
+      selectedIcon: Icon(Icons.home_rounded),
+      label: Text('Home'),
+    ),
+    NavigationRailDestination(
+      icon: Icon(Icons.explore_outlined),
+      selectedIcon: Icon(Icons.explore_rounded),
+      label: Text('Explore'),
+    ),
+    NavigationRailDestination(
+      icon: Icon(Icons.map_outlined),
+      selectedIcon: Icon(Icons.map_rounded),
+      label: Text('Trips'),
+    ),
+    NavigationRailDestination(
+      icon: Icon(Icons.hotel_outlined),
+      selectedIcon: Icon(Icons.hotel_rounded),
+      label: Text('Stay'),
+    ),
+    NavigationRailDestination(
+      icon: Icon(Icons.person_outline_rounded),
+      selectedIcon: Icon(Icons.person_rounded),
+      label: Text('Profile'),
+    ),
+  ];
+
+  Widget _screenForIndex(int index) {
+    switch (index) {
+      case _homeIndex:
+        return const HomeScreen();
+      case _exploreIndex:
+        return const ExploreScreen();
+      case _tripsIndex:
+        return const TripsScreen();
+      case _staysIndex:
+        return const StaysScreen();
+      case _profileIndex:
+        return const ProfileScreen();
+      default:
+        throw RangeError.index(index, _destinations);
     }
+  }
+
+  void _onDestinationSelected(int index) {
+    if (index < 0 || index >= _destinationCount) return;
+    if (index == _selectedIndex && !_isAiOpen) return;
 
     setState(() {
+      // Construct the page before switching to its index.
+      // It will be retained in the IndexedStack afterwards.
+      _screens[index] ??= _screenForIndex(index);
+
       _selectedIndex = index;
       _isAiOpen = false;
     });
   }
 
+  void _goHome() {
+    if (!mounted) return;
+
+    if (_selectedIndex == _homeIndex && !_isAiOpen) return;
+
+    setState(() {
+      _screens[_homeIndex] ??= const HomeScreen();
+      _selectedIndex = _homeIndex;
+      _isAiOpen = false;
+    });
+  }
+
   void _toggleAiAssistant() {
+    if (!mounted) return;
+
     setState(() {
       _isAiOpen = !_isAiOpen;
     });
   }
 
+  void _closeAiAssistant() {
+    if (!mounted || !_isAiOpen) return;
+
+    setState(() {
+      _isAiOpen = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          IndexedStack(
-            index: _selectedIndex,
-            children: _screens,
-          ),
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width >= 900;
 
-          if (_isAiOpen)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _isAiOpen = false;
-                  });
-                },
-                child: Container(
-                  color: Colors.black.withOpacity(0.12),
+    // IndexedStack requires a child for each index. Unvisited destinations
+    // get lightweight placeholders until the user selects them.
+    final screenChildren = _screens
+        .map<Widget>((screen) => screen ?? const SizedBox.shrink())
+        .toList(growable: false);
+
+    return AppShellNavigation(
+      goHome: _goHome,
+      child: Scaffold(
+        backgroundColor: WorldCompanionColors.softWhite,
+        body: Row(
+          children: [
+            if (isWide)
+              Container(
+                width: 92,
+                decoration: const BoxDecoration(
+                  color: WorldCompanionColors.surface,
+                  border: Border(
+                    right: BorderSide(
+                      color: WorldCompanionColors.border,
+                    ),
+                  ),
+                ),
+                child: SafeArea(
+                  child: Column(
+                    children: [
+                      const SizedBox(
+                        height: WorldCompanionSpacing.lg,
+                      ),
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: WorldCompanionColors.deepOcean,
+                          borderRadius: BorderRadius.circular(
+                            WorldCompanionRadius.large,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.explore_rounded,
+                          color: Colors.white,
+                          size: 27,
+                        ),
+                      ),
+                      const SizedBox(
+                        height: WorldCompanionSpacing.xl,
+                      ),
+                      Expanded(
+                        child: NavigationRail(
+                          selectedIndex: _selectedIndex,
+                          onDestinationSelected: _onDestinationSelected,
+                          labelType: NavigationRailLabelType.all,
+                          backgroundColor: Colors.transparent,
+                          useIndicator: true,
+                          indicatorColor:
+                              WorldCompanionColors.infoSurface,
+                          selectedIconTheme: const IconThemeData(
+                            color: WorldCompanionColors.deepOcean,
+                            size: 23,
+                          ),
+                          unselectedIconTheme: const IconThemeData(
+                            color: WorldCompanionColors.mutedText,
+                            size: 22,
+                          ),
+                          selectedLabelTextStyle:
+                              Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color:
+                                        WorldCompanionColors.deepOcean,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                          unselectedLabelTextStyle:
+                              Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color:
+                                        WorldCompanionColors.mutedText,
+                                  ),
+                          destinations: _railDestinations,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: WorldCompanionSpacing.lg,
+                        ),
+                        child: IconButton(
+                          tooltip: _isAiOpen
+                              ? 'Close AI travel assistant'
+                              : 'Open AI travel assistant',
+                          onPressed: _toggleAiAssistant,
+                          style: IconButton.styleFrom(
+                            backgroundColor:
+                                WorldCompanionColors.deepOcean,
+                            foregroundColor: Colors.white,
+                            fixedSize: const Size(48, 48),
+                          ),
+                          icon: Icon(
+                            _isAiOpen
+                                ? Icons.close_rounded
+                                : Icons.auto_awesome_rounded,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Positioned.fill(
+                    child: IndexedStack(
+                      index: _selectedIndex,
+                      children: screenChildren,
+                    ),
+                  ),
 
-          if (_isAiOpen)
-            const Positioned(
-              left: 16,
-              right: 16,
-              bottom: 76,
-              child: _AiAssistantPanel(),
-            ),
+                  // Tap outside the assistant to dismiss it.
+                  if (_isAiOpen)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _closeAiAssistant,
+                        child: ColoredBox(
+                          color: WorldCompanionColors.deepOcean
+                              .withOpacity(0.22),
+                        ),
+                      ),
+                    ),
 
-          Positioned(
-            right: 18,
-            bottom: 12,
-            child: _AiFloatingButton(
-              isOpen: _isAiOpen,
-              onTap: _toggleAiAssistant,
+                  if (_isAiOpen)
+                    Positioned(
+                      left: isWide
+                          ? null
+                          : WorldCompanionSpacing.sm,
+                      right: isWide
+                          ? WorldCompanionSpacing.lg
+                          : WorldCompanionSpacing.sm,
+                      bottom: isWide ? 28 : 82,
+                      width: isWide ? 420 : null,
+                      child: SafeArea(
+                        top: false,
+                        child: _AiAssistantPanel(
+                          onClose: _closeAiAssistant,
+                        ),
+                      ),
+                    ),
+
+                  if (!isWide)
+                    Positioned(
+                      right: WorldCompanionSpacing.md,
+                      bottom: WorldCompanionSpacing.sm,
+                      child: SafeArea(
+                        top: false,
+                        child: _AiFloatingButton(
+                          isOpen: _isAiOpen,
+                          onTap: _toggleAiAssistant,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: _onDestinationSelected,
-        backgroundColor: surface,
-        elevation: 0,
-        height: 72,
-        indicatorColor: aqua,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(
-              Icons.home_outlined,
-              color: deep,
-            ),
-            selectedIcon: Icon(
-              Icons.home_rounded,
-              color: primary,
-            ),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(
-              Icons.explore_outlined,
-              color: deep,
-            ),
-            selectedIcon: Icon(
-              Icons.explore_rounded,
-              color: primary,
-            ),
-            label: 'Explore',
-          ),
-          NavigationDestination(
-            icon: Icon(
-              Icons.map_outlined,
-              color: deep,
-            ),
-            selectedIcon: Icon(
-              Icons.map_rounded,
-              color: primary,
-            ),
-            label: 'Trips',
-          ),
-          NavigationDestination(
-            icon: Icon(
-              Icons.hotel_outlined,
-              color: deep,
-            ),
-            selectedIcon: Icon(
-              Icons.hotel_rounded,
-              color: primary,
-            ),
-            label: 'Stay',
-          ),
-          NavigationDestination(
-            icon: Icon(
-              Icons.person_outline_rounded,
-              color: deep,
-            ),
-            selectedIcon: Icon(
-              Icons.person_rounded,
-              color: primary,
-            ),
-            label: 'Profile',
-          ),
-        ],
+          ],
+        ),
+        bottomNavigationBar: isWide
+            ? null
+            : NavigationBar(
+                height: 72,
+                selectedIndex: _selectedIndex,
+                onDestinationSelected: _onDestinationSelected,
+                backgroundColor: WorldCompanionColors.surface,
+                indicatorColor: WorldCompanionColors.infoSurface,
+                surfaceTintColor: Colors.transparent,
+                elevation: WorldCompanionElevation.low,
+                labelBehavior:
+                    NavigationDestinationLabelBehavior.alwaysShow,
+                destinations: _destinations,
+              ),
       ),
     );
   }
@@ -169,43 +388,43 @@ class _AiFloatingButton extends StatelessWidget {
   final bool isOpen;
   final VoidCallback onTap;
 
-  static const Color primary = Color(0xFF0E7774);
-
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-        width: 54,
-        height: 54,
-        decoration: BoxDecoration(
-          color: primary,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.18),
-              blurRadius: 14,
-              offset: const Offset(0, 5),
+    return Semantics(
+      button: true,
+      label: isOpen
+          ? 'Close AI travel assistant'
+          : 'Open AI travel assistant',
+      child: Material(
+        color: WorldCompanionColors.deepOcean,
+        shape: const CircleBorder(),
+        elevation: WorldCompanionElevation.medium,
+        shadowColor:
+            WorldCompanionColors.deepOcean.withOpacity(0.2),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: 54,
+            height: 54,
+            child: AnimatedSwitcher(
+              duration: WorldCompanionMotion.fast,
+              switchInCurve: WorldCompanionMotion.standardCurve,
+              transitionBuilder: (child, animation) {
+                return ScaleTransition(
+                  scale: animation,
+                  child: child,
+                );
+              },
+              child: Icon(
+                isOpen
+                    ? Icons.close_rounded
+                    : Icons.auto_awesome_rounded,
+                key: ValueKey<bool>(isOpen),
+                color: Colors.white,
+                size: isOpen ? 26 : 24,
+              ),
             ),
-          ],
-        ),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          transitionBuilder: (child, animation) {
-            return ScaleTransition(
-              scale: animation,
-              child: child,
-            );
-          },
-          child: Icon(
-            isOpen
-                ? Icons.close_rounded
-                : Icons.auto_awesome_rounded,
-            key: ValueKey<bool>(isOpen),
-            color: Colors.white,
-            size: isOpen ? 26 : 24,
           ),
         ),
       ),
@@ -214,20 +433,19 @@ class _AiFloatingButton extends StatelessWidget {
 }
 
 class _AiAssistantPanel extends StatefulWidget {
-  const _AiAssistantPanel();
+  const _AiAssistantPanel({
+    required this.onClose,
+  });
+
+  final VoidCallback onClose;
 
   @override
-  State<_AiAssistantPanel> createState() =>
-      _AiAssistantPanelState();
+  State<_AiAssistantPanel> createState() => _AiAssistantPanelState();
 }
 
 class _AiAssistantPanelState extends State<_AiAssistantPanel> {
-  static const Color primary = Color(0xFF0E7774);
-  static const Color deep = Color(0xFF123B43);
-  static const Color aqua = Color(0xFFDFF4F1);
-  static const Color background = Color(0xFFF7F9F8);
-  static const Color muted = Color(0xFF68777B);
-  static const Color line = Color(0xFFDCE5E4);
+  static const int maxConversationMessages = 20;
+  static const int maxToolContextEntries = 20;
 
   final TextEditingController _messageController =
       TextEditingController();
@@ -236,8 +454,11 @@ class _AiAssistantPanelState extends State<_AiAssistantPanel> {
       ScrollController();
 
   final List<_ChatMessage> _messages = [];
+  final List<Map<String, dynamic>> _toolContext = [];
 
   bool _isLoading = false;
+  bool _requiresConfirmation = false;
+  String? _pendingActionMessage;
 
   @override
   void dispose() {
@@ -246,38 +467,108 @@ class _AiAssistantPanelState extends State<_AiAssistantPanel> {
     super.dispose();
   }
 
+  List<Map<String, dynamic>> _buildConversationHistory() {
+    final startIndex = _messages.length > maxConversationMessages
+        ? _messages.length - maxConversationMessages
+        : 0;
+
+    final conversation = _messages
+        .sublist(startIndex)
+        .map(
+          (message) => <String, dynamic>{
+            'role': message.isUser ? 'user' : 'assistant',
+            'content': message.text,
+          },
+        )
+        .toList();
+
+    if (_toolContext.isNotEmpty) {
+      conversation.add({
+        'role': 'tool_context',
+        'content': jsonEncode(_toolContext),
+      });
+    }
+
+    return conversation;
+  }
+
+  void _updateToolContext(dynamic rawContext) {
+    if (rawContext is! List) return;
+
+    for (final item in rawContext) {
+      if (item is Map) {
+        _toolContext.add(Map<String, dynamic>.from(item));
+      }
+    }
+
+    if (_toolContext.length > maxToolContextEntries) {
+      _toolContext.removeRange(
+        0,
+        _toolContext.length - maxToolContextEntries,
+      );
+    }
+  }
+
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
 
-    if (text.isEmpty || _isLoading) {
-      return;
-    }
+    if (text.isEmpty || _isLoading) return;
+
+    await _sendAssistantRequest(
+      text: text,
+      confirmed: false,
+      addUserMessage: true,
+    );
+  }
+
+  Future<void> _sendAssistantRequest({
+    required String text,
+    required bool confirmed,
+    required bool addUserMessage,
+  }) async {
+    if (_isLoading) return;
+
+    final conversation = _buildConversationHistory();
+
+    if (!mounted) return;
 
     setState(() {
-      _messages.add(
-        _ChatMessage(
-          text: text,
-          isUser: true,
-        ),
-      );
+      if (addUserMessage) {
+        _messages.add(
+          _ChatMessage(text: text, isUser: true),
+        );
+      }
 
       _isLoading = true;
+
+      if (confirmed) {
+        _requiresConfirmation = false;
+        _pendingActionMessage = null;
+      }
     });
 
-    _messageController.clear();
+    if (addUserMessage) {
+      _messageController.clear();
+    }
 
     _scrollToBottom();
 
     try {
-      final response =
-          await ApiService.sendAssistantMessage(text);
+      final response = await ApiService.sendAssistantMessage(
+        text,
+        conversation: conversation,
+        confirmed: confirmed,
+      );
+
+      _updateToolContext(response['tool_context']);
 
       final assistantMessage =
-          _formatAssistantMessage(response["message"]);
+          _formatAssistantMessage(response['message']);
 
-      if (!mounted) {
-        return;
-      }
+      final requiresConfirmation =
+          response['requires_confirmation'] == true;
+
+      if (!mounted) return;
 
       setState(() {
         _messages.add(
@@ -288,26 +579,51 @@ class _AiAssistantPanelState extends State<_AiAssistantPanel> {
         );
 
         _isLoading = false;
+        _requiresConfirmation = requiresConfirmation;
+        _pendingActionMessage =
+            requiresConfirmation ? text : null;
       });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
+    } catch (_) {
+      if (!mounted) return;
 
       setState(() {
         _messages.add(
           const _ChatMessage(
             text:
-                "I couldn't connect to WorldCompanion right now.",
+                "I couldn't connect to WorldCompanion right now. Please try again.",
             isUser: false,
           ),
         );
-
         _isLoading = false;
       });
     }
 
     _scrollToBottom();
+  }
+
+  Future<void> _confirmAction() async {
+    final pendingMessage = _pendingActionMessage;
+
+    if (pendingMessage == null ||
+        pendingMessage.trim().isEmpty ||
+        _isLoading) {
+      return;
+    }
+
+    await _sendAssistantRequest(
+      text: pendingMessage,
+      confirmed: true,
+      addUserMessage: false,
+    );
+  }
+
+  void _cancelAction() {
+    if (!mounted) return;
+
+    setState(() {
+      _requiresConfirmation = false;
+      _pendingActionMessage = null;
+    });
   }
 
   String _formatAssistantMessage(dynamic message) {
@@ -316,18 +632,19 @@ class _AiAssistantPanelState extends State<_AiAssistantPanel> {
     }
 
     if (message is String) {
-      return message;
+      final text = message.trim();
+      return text.isEmpty
+          ? "I couldn't generate a response."
+          : text;
     }
 
     if (message is Map) {
-      final place = message["place"]?.toString();
-      final category = message["category"]?.toString();
-      final info = message["info"];
+      final place = message['place']?.toString();
+      final category = message['category']?.toString();
+      final info = message['info'];
 
       if (place != null && info is List) {
-        final buffer = StringBuffer();
-
-        buffer.writeln(place);
+        final buffer = StringBuffer()..writeln(place);
 
         if (category != null && category.isNotEmpty) {
           buffer.writeln(category);
@@ -336,26 +653,26 @@ class _AiAssistantPanelState extends State<_AiAssistantPanel> {
         buffer.writeln();
 
         for (final item in info) {
-          if (item is Map) {
-            final topic = item["topic"]?.toString();
-            final content = item["content"]?.toString();
+          if (item is! Map) continue;
 
-            if (topic != null && topic.isNotEmpty) {
-              buffer.writeln(topic);
-            }
+          final topic = item['topic']?.toString();
+          final content = item['content']?.toString();
 
-            if (content != null && content.isNotEmpty) {
-              buffer.writeln(content);
-            }
-
-            buffer.writeln();
+          if (topic != null && topic.isNotEmpty) {
+            buffer.writeln('**$topic**');
           }
+
+          if (content != null && content.isNotEmpty) {
+            buffer.writeln(content);
+          }
+
+          buffer.writeln();
         }
 
         return buffer.toString().trim();
       }
 
-      return message.toString();
+      return jsonEncode(message);
     }
 
     return message.toString();
@@ -363,199 +680,165 @@ class _AiAssistantPanelState extends State<_AiAssistantPanel> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_chatScrollController.hasClients) {
-        return;
-      }
+      if (!mounted || !_chatScrollController.hasClients) return;
 
       _chatScrollController.animateTo(
         _chatScrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOut,
+        duration: WorldCompanionMotion.standard,
+        curve: WorldCompanionMotion.standardCurve,
       );
     });
   }
 
   void _useSuggestion(String text) {
-    _messageController.text = text;
-
-    _messageController.selection =
-        TextSelection.fromPosition(
-      TextPosition(
-        offset: _messageController.text.length,
-      ),
-    );
+    _messageController
+      ..text = text
+      ..selection = TextSelection.collapsed(
+        offset: text.length,
+      );
   }
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final panelHeight =
+        (size.height * 0.68).clamp(320.0, 560.0).toDouble();
+
     return Material(
-      color: Colors.transparent,
-      child: Container(
-        height: 470,
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(26),
-          border: Border.all(
-            color: line,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.18),
-              blurRadius: 28,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
+      color: WorldCompanionColors.surface,
+      elevation: WorldCompanionElevation.high,
+      shadowColor:
+          WorldCompanionColors.deepOcean.withOpacity(0.16),
+      clipBehavior: Clip.antiAlias,
+      borderRadius: BorderRadius.circular(
+        WorldCompanionRadius.extraLarge,
+      ),
+      child: SizedBox(
+        height: panelHeight,
         child: Column(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(
-                18,
-                16,
-                18,
-                14,
+                WorldCompanionSpacing.md,
+                WorldCompanionSpacing.sm,
+                WorldCompanionSpacing.sm,
+                WorldCompanionSpacing.sm,
               ),
               child: Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
-                      color: aqua,
-                      borderRadius: BorderRadius.circular(13),
+                      color: WorldCompanionColors.infoSurface,
+                      borderRadius: BorderRadius.circular(
+                        WorldCompanionRadius.medium,
+                      ),
                     ),
                     child: const Icon(
                       Icons.auto_awesome_rounded,
-                      color: primary,
-                      size: 21,
+                      color: WorldCompanionColors.deepOcean,
+                      size: 22,
                     ),
                   ),
-                  const SizedBox(width: 11),
-                  const Expanded(
+                  const SizedBox(
+                    width: WorldCompanionSpacing.sm,
+                  ),
+                  Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'WorldCompanion',
-                          style: TextStyle(
-                            color: deep,
-                            fontSize: 16,
+                          style: WorldCompanionTypography
+                              .textTheme.titleMedium
+                              ?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        SizedBox(height: 2),
                         Text(
                           'Your AI travel companion',
-                          style: TextStyle(
-                            color: muted,
-                            fontSize: 11,
-                          ),
+                          style: WorldCompanionTypography
+                              .textTheme.bodySmall,
                         ),
                       ],
                     ),
                   ),
+                  IconButton(
+                    tooltip: 'Close assistant',
+                    onPressed: widget.onClose,
+                    icon: const Icon(Icons.close_rounded),
+                  ),
                 ],
               ),
             ),
-
             const Divider(
               height: 1,
-              color: line,
+              color: WorldCompanionColors.border,
             ),
-
             Expanded(
               child: ListView(
                 controller: _chatScrollController,
-                padding: const EdgeInsets.fromLTRB(
-                  16,
-                  16,
-                  16,
-                  12,
+                padding: const EdgeInsets.all(
+                  WorldCompanionSpacing.md,
                 ),
                 children: [
                   if (_messages.isEmpty) ...[
-                    const Text(
-                      'How can I help with your trip?',
-                      style: TextStyle(
-                        color: deep,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                        height: 1.2,
+                    Text(
+                      'Where would you like to go?',
+                      style: WorldCompanionTypography
+                          .textTheme.headlineSmall,
+                    ),
+                    const SizedBox(
+                      height: WorldCompanionSpacing.xs,
+                    ),
+                    Text(
+                      'Ask about places, routes, hotels, or your travel plans.',
+                      style: WorldCompanionTypography
+                          .textTheme.bodyMedium,
+                    ),
+                    const SizedBox(
+                      height: WorldCompanionSpacing.lg,
+                    ),
+                    Text(
+                      'TRY ASKING',
+                      style: WorldCompanionTypography
+                          .textTheme.labelMedium
+                          ?.copyWith(
+                        color: WorldCompanionColors.oceanBlue,
+                        letterSpacing: 1,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Ask me about places, routes, hotels, '
-                      'recommendations, or your trips.',
-                      style: TextStyle(
-                        color: muted,
-                        fontSize: 12,
-                        height: 1.4,
-                      ),
+                    const SizedBox(
+                      height: WorldCompanionSpacing.sm,
                     ),
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Try asking',
-                      style: TextStyle(
-                        color: deep,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 9),
-
                     _SuggestionChip(
                       icon: Icons.spa_outlined,
                       text: 'Find somewhere relaxing',
-                      onTap: () {
-                        _useSuggestion(
-                          'Find somewhere relaxing',
-                        );
-                      },
+                      onTap: () => _useSuggestion(
+                        'Find somewhere relaxing',
+                      ),
                     ),
-
-                    const SizedBox(height: 8),
-
                     _SuggestionChip(
                       icon: Icons.nightlife_outlined,
                       text: 'Plan my evening',
-                      onTap: () {
-                        _useSuggestion(
-                          'Plan my evening',
-                        );
-                      },
+                      onTap: () => _useSuggestion(
+                        'Plan my evening',
+                      ),
                     ),
-
-                    const SizedBox(height: 8),
-
                     _SuggestionChip(
                       icon: Icons.hotel_outlined,
                       text: 'Find hotels',
-                      onTap: () {
-                        _useSuggestion(
-                          'Find hotels',
-                        );
-                      },
+                      onTap: () => _useSuggestion('Find hotels'),
                     ),
-
-                    const SizedBox(height: 8),
-
                     _SuggestionChip(
                       icon: Icons.route_outlined,
                       text: 'Plan a route',
-                      onTap: () {
-                        _useSuggestion(
-                          'Plan a route',
-                        );
-                      },
+                      onTap: () => _useSuggestion('Plan a route'),
                     ),
                   ] else ...[
                     for (final message in _messages)
-                      _ChatBubble(
-                        message: message,
-                      ),
-
+                      _ChatBubble(message: message),
                     if (_isLoading)
                       const _ChatBubble(
                         message: _ChatMessage(
@@ -563,126 +846,106 @@ class _AiAssistantPanelState extends State<_AiAssistantPanel> {
                           isUser: false,
                         ),
                       ),
+                    if (_requiresConfirmation && !_isLoading)
+                      _ConfirmationCard(
+                        onConfirm: _confirmAction,
+                        onCancel: _cancelAction,
+                      ),
                   ],
                 ],
               ),
             ),
-
-            Container(
+            const Divider(
+              height: 1,
+              color: WorldCompanionColors.border,
+            ),
+            Padding(
               padding: const EdgeInsets.fromLTRB(
-                12,
-                8,
-                12,
-                12,
-              ),
-              decoration: const BoxDecoration(
-                color: background,
-                border: Border(
-                  top: BorderSide(
-                    color: line,
-                    width: 1,
-                  ),
-                ),
-                borderRadius: BorderRadius.vertical(
-                  bottom: Radius.circular(26),
-                ),
+                WorldCompanionSpacing.sm,
+                WorldCompanionSpacing.sm,
+                WorldCompanionSpacing.sm,
+                WorldCompanionSpacing.md,
               ),
               child: SafeArea(
                 top: false,
                 child: Row(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Expanded(
                       child: TextField(
                         controller: _messageController,
                         minLines: 1,
                         maxLines: 3,
-                        textInputAction:
-                            TextInputAction.newline,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _sendMessage(),
                         decoration: InputDecoration(
-                          hintText:
-                              'Ask WorldCompanion...',
-                          hintStyle: const TextStyle(
-                            color: muted,
-                            fontSize: 13,
-                          ),
-                          filled: true,
-                          fillColor: Colors.white,
-                          contentPadding:
-                              const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 11,
-                          ),
+                          hintText: 'Ask WorldCompanion...',
                           prefixIcon: const Icon(
                             Icons.chat_bubble_outline_rounded,
-                            color: muted,
-                            size: 19,
+                          ),
+                          filled: true,
+                          fillColor: WorldCompanionColors.aiSurface,
+                          contentPadding:
+                              const EdgeInsets.symmetric(
+                            horizontal: WorldCompanionSpacing.md,
+                            vertical: WorldCompanionSpacing.sm,
                           ),
                           border: OutlineInputBorder(
-                            borderRadius:
-                                BorderRadius.circular(17),
-                            borderSide:
-                                const BorderSide(
-                              color: line,
+                            borderRadius: BorderRadius.circular(
+                              WorldCompanionRadius.large,
+                            ),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              WorldCompanionRadius.large,
+                            ),
+                            borderSide: const BorderSide(
+                              color: WorldCompanionColors.border,
                             ),
                           ),
-                          enabledBorder:
-                              OutlineInputBorder(
-                            borderRadius:
-                                BorderRadius.circular(17),
-                            borderSide:
-                                const BorderSide(
-                              color: line,
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              WorldCompanionRadius.large,
                             ),
-                          ),
-                          focusedBorder:
-                              OutlineInputBorder(
-                            borderRadius:
-                                BorderRadius.circular(17),
-                            borderSide:
-                                const BorderSide(
-                              color: primary,
-                              width: 1.3,
+                            borderSide: const BorderSide(
+                              color: WorldCompanionColors.oceanBlue,
+                              width: 1.5,
                             ),
                           ),
                         ),
-                        onSubmitted: (_) {
-                          _sendMessage();
-                        },
                       ),
                     ),
-                    const SizedBox(width: 7),
-                    GestureDetector(
-                      onTap: _isLoading
-                          ? null
-                          : _sendMessage,
-                      child: AnimatedContainer(
-                        duration:
-                            const Duration(milliseconds: 180),
-                        width: 46,
-                        height: 46,
-                        decoration: BoxDecoration(
-                          color: _isLoading
-                              ? primary.withOpacity(0.55)
-                              : primary,
-                          borderRadius:
-                              BorderRadius.circular(15),
+                    const SizedBox(
+                      width: WorldCompanionSpacing.xs,
+                    ),
+                    SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed:
+                            _isLoading ? null : _sendMessage,
+                        style: FilledButton.styleFrom(
+                          backgroundColor:
+                              WorldCompanionColors.deepOcean,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              WorldCompanionRadius.medium,
+                            ),
+                          ),
                         ),
                         child: _isLoading
                             ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child:
-                                    CircularProgressIndicator(
+                                width: 19,
+                                height: 19,
+                                child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
                                 ),
                               )
                             : const Icon(
                                 Icons.arrow_upward_rounded,
-                                color: Colors.white,
-                                size: 21,
                               ),
                       ),
                     ),
@@ -692,6 +955,89 @@ class _AiAssistantPanelState extends State<_AiAssistantPanel> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ConfirmationCard extends StatelessWidget {
+  const _ConfirmationCard({
+    required this.onConfirm,
+    required this.onCancel,
+  });
+
+  final VoidCallback onConfirm;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(
+        bottom: WorldCompanionSpacing.sm,
+      ),
+      padding: const EdgeInsets.all(
+        WorldCompanionSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: WorldCompanionColors.warningSurface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.large,
+        ),
+        border: Border.all(
+          color: WorldCompanionColors.warning.withOpacity(0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.verified_outlined,
+                color: WorldCompanionColors.warning,
+              ),
+              const SizedBox(
+                width: WorldCompanionSpacing.xs,
+              ),
+              Expanded(
+                child: Text(
+                  'Confirmation required',
+                  style:
+                      WorldCompanionTypography.textTheme.titleSmall,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(
+            height: WorldCompanionSpacing.xs,
+          ),
+          Text(
+            'Please confirm before WorldCompanion completes this action.',
+            style: WorldCompanionTypography.textTheme.bodySmall,
+          ),
+          const SizedBox(
+            height: WorldCompanionSpacing.md,
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: onCancel,
+                  child: const Text('Cancel'),
+                ),
+              ),
+              const SizedBox(
+                width: WorldCompanionSpacing.xs,
+              ),
+              Expanded(
+                child: FilledButton(
+                  onPressed: onConfirm,
+                  child: const Text('Confirm'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -714,45 +1060,58 @@ class _ChatBubble extends StatelessWidget {
 
   final _ChatMessage message;
 
-  static const Color primary = Color(0xFF0E7774);
-  static const Color deep = Color(0xFF123B43);
-  static const Color line = Color(0xFFDCE5E4);
-
   @override
   Widget build(BuildContext context) {
+    final isUser = message.isUser;
+
     return Align(
-      alignment: message.isUser
-          ? Alignment.centerRight
-          : Alignment.centerLeft,
+      alignment:
+          isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: const BoxConstraints(
-          maxWidth: 270,
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width < 500
+              ? double.infinity
+              : 320,
         ),
         margin: const EdgeInsets.only(
-          bottom: 10,
+          bottom: WorldCompanionSpacing.sm,
         ),
         padding: const EdgeInsets.symmetric(
-          horizontal: 13,
-          vertical: 10,
+          horizontal: WorldCompanionSpacing.md,
+          vertical: WorldCompanionSpacing.sm,
         ),
         decoration: BoxDecoration(
-          color: message.isUser
-              ? primary
-              : Colors.white,
-          borderRadius: BorderRadius.circular(17),
-          border: message.isUser
+          color: isUser
+              ? WorldCompanionColors.deepOcean
+              : WorldCompanionColors.aiSurface,
+          borderRadius: BorderRadius.circular(
+            WorldCompanionRadius.large,
+          ).copyWith(
+            bottomRight: isUser
+                ? const Radius.circular(
+                    WorldCompanionRadius.small,
+                  )
+                : null,
+            bottomLeft: !isUser
+                ? const Radius.circular(
+                    WorldCompanionRadius.small,
+                  )
+                : null,
+          ),
+          border: isUser
               ? null
               : Border.all(
-                  color: line,
+                  color: WorldCompanionColors.border,
                 ),
         ),
-        child: message.isUser
+        child: isUser
             ? Text(
                 message.text,
-                style: const TextStyle(
+                style: WorldCompanionTypography
+                    .textTheme.bodyMedium
+                    ?.copyWith(
                   color: Colors.white,
-                  fontSize: 13,
-                  height: 1.4,
+                  height: 1.5,
                 ),
               )
             : MarkdownBody(
@@ -760,73 +1119,24 @@ class _ChatBubble extends StatelessWidget {
                 shrinkWrap: true,
                 selectable: true,
                 styleSheet: MarkdownStyleSheet(
-                  p: const TextStyle(
-                    color: deep,
-                    fontSize: 13,
-                    height: 1.4,
-                  ),
-                  strong: const TextStyle(
-                    color: deep,
-                    fontSize: 13,
+                  p: WorldCompanionTypography
+                      .textTheme.bodyMedium
+                      ?.copyWith(height: 1.5),
+                  strong: WorldCompanionTypography
+                      .textTheme.bodyMedium
+                      ?.copyWith(
                     fontWeight: FontWeight.w700,
-                    height: 1.4,
+                    color: WorldCompanionColors.deepOcean,
                   ),
-                  em: const TextStyle(
-                    color: deep,
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic,
-                    height: 1.4,
-                  ),
-                  h1: const TextStyle(
-                    color: deep,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
-                  ),
-                  h2: const TextStyle(
-                    color: deep,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
-                  ),
-                  h3: const TextStyle(
-                    color: deep,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    height: 1.35,
-                  ),
-                  listBullet: const TextStyle(
-                    color: deep,
-                    fontSize: 13,
-                    height: 1.4,
-                  ),
-                  listBulletPadding: const EdgeInsets.only(
-                    right: 6,
-                  ),
-                  tableHead: const TextStyle(
-                    color: deep,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  tableBody: const TextStyle(
-                    color: deep,
-                    fontSize: 11,
-                    height: 1.35,
-                  ),
-                  tableBorder: TableBorder.all(
-                    color: line,
-                    width: 0.7,
-                  ),
-                  tableHeadAlign: TextAlign.left,
-                  blockSpacing: 8,
-                  listIndent: 16,
-                  horizontalRuleDecoration: const BoxDecoration(
-                    border: Border(
-                      top: BorderSide(
-                        color: line,
-                      ),
-                    ),
-                  ),
+                  h1: WorldCompanionTypography
+                      .textTheme.headlineSmall,
+                  h2: WorldCompanionTypography
+                      .textTheme.titleLarge,
+                  h3: WorldCompanionTypography
+                      .textTheme.titleMedium,
+                  listBullet:
+                      WorldCompanionTypography.textTheme.bodyMedium,
+                  blockSpacing: WorldCompanionSpacing.sm,
                 ),
               ),
       ),
@@ -845,53 +1155,63 @@ class _SuggestionChip extends StatelessWidget {
   final String text;
   final VoidCallback onTap;
 
-  static const Color primary = Color(0xFF0E7774);
-  static const Color deep = Color(0xFF123B43);
-  static const Color line = Color(0xFFDCE5E4);
-
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 11,
+    return Padding(
+      padding: const EdgeInsets.only(
+        bottom: WorldCompanionSpacing.xs,
+      ),
+      child: Material(
+        color: WorldCompanionColors.surface,
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.medium,
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(
+            WorldCompanionRadius.medium,
           ),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: line,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: WorldCompanionSpacing.md,
+              vertical: WorldCompanionSpacing.sm,
             ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                color: primary,
-                size: 19,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(
+                WorldCompanionRadius.medium,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  text,
-                  style: const TextStyle(
-                    color: deep,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+              border: Border.all(
+                color: WorldCompanionColors.border,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: WorldCompanionColors.oceanBlue,
+                  size: 19,
+                ),
+                const SizedBox(
+                  width: WorldCompanionSpacing.sm,
+                ),
+                Expanded(
+                  child: Text(
+                    text,
+                    style: WorldCompanionTypography
+                        .textTheme.bodyMedium
+                        ?.copyWith(
+                      color: WorldCompanionColors.deepOcean,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
-              const Icon(
-                Icons.arrow_forward_ios_rounded,
-                color: deep,
-                size: 13,
-              ),
-            ],
+                const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: WorldCompanionColors.mutedText,
+                  size: 13,
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -1,4 +1,7 @@
+import json
 from typing import Any
+
+from places.geoapify_provider import get_place_details
 
 from api.assistant.agent import AssistantAgent
 from api.assistant.context import build_user_context
@@ -64,13 +67,16 @@ class AssistantService:
             "message": plan.response,
         }
 
-    def _is_recommendation_request(self, message: str) -> bool:
+    def _is_recommendation_request(
+        self,
+        message: str,
+    ) -> bool:
         """
-        Detect recommendation-style requests before sending the
-        message to the LLM tool-selection loop.
+        Legacy recommendation detector.
 
-        This prevents the LLM from treating recommendation requests
-        as generic place searches.
+        Recommendation routing is now handled by the LLM so that
+        natural-language travel intent can be understood instead
+        of relying on hard-coded phrases.
         """
 
         text = message.lower().strip()
@@ -173,15 +179,17 @@ class AssistantService:
         message: str,
     ) -> dict[str, Any]:
         """
-        Deterministically execute the recommendation tool.
+        Legacy deterministic recommendation handler.
 
-        The current recommendation engine uses the authenticated
-        user's saved preferences and the current request.
+        Kept for compatibility, but normal assistant routing now
+        uses the LLM intent-understanding path.
         """
 
         result = self.execute_tool(
             tool_name="get_recommendations",
-            arguments={"query": message},
+            arguments={
+                "query": message,
+            },
             confirmed=False,
         )
 
@@ -219,7 +227,11 @@ class AssistantService:
             recommendations,
             start=1,
         ):
-            name = place.get("name", "Unknown place")
+            name = place.get(
+                "name",
+                "Unknown place",
+            )
+
             category = place.get("category")
 
             if category:
@@ -246,12 +258,12 @@ class AssistantService:
             "requires_confirmation": False,
         }
 
-    def _is_place_info_request(self, message: str) -> bool:
+    def _is_place_info_request(
+        self,
+        message: str,
+    ) -> bool:
         """
         Detect requests asking for information about a specific place.
-
-        These requests should be resolved through WorldCompanion's
-        place tools instead of relying on the LLM's general knowledge.
         """
 
         text = message.lower().strip()
@@ -335,10 +347,34 @@ class AssistantService:
                 "requires_confirmation": False,
             }
 
+        # ---------------------------------------------------------
+        # Resolve the provider/location ID safely.
+        #
+        # Different location providers may expose the identifier
+        # under slightly different keys.
+        # ---------------------------------------------------------
+
+        place_id = (
+            resolved.get("id")
+            or resolved.get("place_id")
+            or resolved.get("placeId")
+            or resolved.get("location_id")
+        )
+
+        if not place_id:
+            return {
+                "success": False,
+                "error": (
+                    "I resolved the place, but WorldCompanion "
+                    "did not return a usable place ID."
+                ),
+                "requires_confirmation": False,
+            }
+
         details = self.execute_tool(
             tool_name="get_place_details",
             arguments={
-                "place_id": resolved["id"],
+                "place_id": place_id,
             },
             confirmed=False,
         )
@@ -363,6 +399,159 @@ class AssistantService:
             "requires_confirmation": False,
         }
 
+    def generate_place_intelligence(
+        self,
+        place_id: str,
+    ) -> dict[str, Any]:
+        """
+        Generate grounded AI intelligence for a specific
+        WorldCompanion real-world place.
+        """
+
+        place_id = str(place_id or "").strip()
+
+        if not place_id:
+            return {
+                "success": False,
+                "error": "place_id is required.",
+            }
+
+        try:
+            details = get_place_details(place_id)
+
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": (
+                    f"Unable to retrieve place details: {exc}"
+                ),
+            }
+
+        if not details:
+            return {
+                "success": False,
+                "error": "Place details were not found.",
+            }
+
+        place_name = details.get(
+            "name",
+            "Unknown place",
+        )
+
+        grounded_data = {
+            "name": place_name,
+            "category": details.get("category"),
+            "subcategory": details.get("subcategory"),
+            "description": details.get("description"),
+            "address": details.get("address"),
+            "website": details.get("website"),
+            "phone": details.get("phone"),
+            "opening_hours": details.get("opening_hours"),
+            "rating": details.get("rating"),
+            "latitude": details.get("latitude"),
+            "longitude": details.get("longitude"),
+            "tags": details.get("tags"),
+        }
+
+        system_message = {
+            "role": "system",
+            "content": (
+                "You are WorldCompanion's Place Intelligence system.\n\n"
+
+                "Your job is to analyze a specific real-world place "
+                "using ONLY the verified place data supplied by "
+                "WorldCompanion.\n\n"
+
+                "GROUNDING RULES:\n"
+                "- Use only the supplied place data.\n"
+                "- Never invent facts about the place.\n"
+                "- Never invent ratings, prices, opening hours, "
+                "facilities, events, history, safety information, "
+                "crowd levels, travel times, or reviews.\n"
+                "- Do not use general knowledge about the place unless "
+                "that information is explicitly present in the supplied "
+                "data.\n"
+                "- If information required for an answer is unavailable, "
+                "say that it is not available in WorldCompanion data.\n"
+                "- Do not claim that you personally visited the place.\n\n"
+
+                "OUTPUT FORMAT:\n"
+                "Return concise travel intelligence using exactly these "
+                "sections:\n\n"
+
+                "WHY VISIT:\n"
+                "Give a short useful explanation based only on the data.\n\n"
+
+                "WHAT TO DO:\n"
+                "Mention activities only when they can reasonably be "
+                "supported by the supplied place data.\n\n"
+
+                "BEST FOR:\n"
+                "Identify suitable visitor types only when supported "
+                "by the available data.\n\n"
+
+                "BEST TIME:\n"
+                "Use opening-hours data if available. Do not invent a "
+                "preferred time of day when the data does not support it.\n\n"
+
+                "TRAVEL INSIGHT:\n"
+                "Give one concise practical insight based only on the "
+                "available information.\n\n"
+
+                "Keep the response concise and useful for a traveler."
+            ),
+        }
+
+        user_message = {
+            "role": "user",
+            "content": (
+                "Generate Place Intelligence for this verified "
+                "WorldCompanion place.\n\n"
+                f"{json.dumps(grounded_data, indent=2, default=str)}"
+            ),
+        }
+
+        try:
+            response = self.llm.chat(
+                messages=[
+                    system_message,
+                    user_message,
+                ],
+            )
+
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": (
+                    f"AI Place Intelligence failed: {exc}"
+                ),
+            }
+
+        assistant_message = response.get(
+            "message",
+            {},
+        )
+
+        content = assistant_message.get(
+            "content",
+            "",
+        ).strip()
+
+        if not content:
+            return {
+                "success": False,
+                "error": (
+                    "AI Place Intelligence returned "
+                    "an empty response."
+                ),
+            }
+
+        return {
+            "success": True,
+            "place": grounded_data,
+            "intelligence": content,
+        }
+
     def handle_message(
         self,
         message: str,
@@ -380,30 +569,9 @@ class AssistantService:
         context = build_user_context(self.user)
 
         # ---------------------------------------------------------
-        # Deterministic recommendation routing
-        # ---------------------------------------------------------
-        #
-        # If this is clearly a recommendation request, execute
-        # get_recommendations directly instead of allowing the
-        # LLM to incorrectly select search_places.
-        #
-        if self._is_recommendation_request(message):
-            result = self._handle_recommendation_request(
-                message=message,
-            )
-
-            result["context"] = context
-
-            return result
-
-        # ---------------------------------------------------------
         # Deterministic place-information routing
         # ---------------------------------------------------------
-        #
-        # If the user is asking for information about a specific
-        # place, resolve the place and retrieve verified
-        # WorldCompanion information before involving the LLM.
-        #
+
         if self._is_place_info_request(message):
             result = self._handle_place_info_request(
                 message=message,
@@ -414,7 +582,7 @@ class AssistantService:
             return result
 
         # ---------------------------------------------------------
-        # Normal LLM + native tool-calling path
+        # LLM travel-intent + native tool-calling path
         # ---------------------------------------------------------
 
         tools = build_ollama_tools()
@@ -453,11 +621,27 @@ class AssistantService:
                 "",
             )
 
+            requires_confirmation = bool(
+                result.get(
+                    "requires_confirmation",
+                    False,
+                )
+            )
+
+            confirmation_tool = result.get(
+                "tool",
+            )
+
             return {
                 "success": True,
                 "message": content,
                 "context": context,
-                "requires_confirmation": False,
+                "tool_context": result.get(
+                    "tool_context",
+                    [],
+                ),
+                "requires_confirmation": requires_confirmation,
+                "tool": confirmation_tool,
                 "raw": result,
             }
 

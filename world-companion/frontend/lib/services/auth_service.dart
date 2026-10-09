@@ -13,7 +13,9 @@ class AuthService {
   ) async {
     final res = await http.post(
       Uri.parse("$baseUrl/api/auth/register/"),
-      headers: {"Content-Type": "application/json"},
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: jsonEncode({
         "username": username,
         "password": password,
@@ -23,6 +25,7 @@ class AuthService {
     _checkOk(res);
 
     final data = jsonDecode(res.body)["data"];
+
     await _saveToken(data["token"]);
 
     return data;
@@ -34,7 +37,9 @@ class AuthService {
   ) async {
     final res = await http.post(
       Uri.parse("$baseUrl/api/auth/login/"),
-      headers: {"Content-Type": "application/json"},
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: jsonEncode({
         "username": username,
         "password": password,
@@ -44,6 +49,7 @@ class AuthService {
     _checkOk(res);
 
     final data = jsonDecode(res.body)["data"];
+
     await _saveToken(data["token"]);
 
     return data;
@@ -51,46 +57,58 @@ class AuthService {
 
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
+
     return prefs.getString(_tokenKey);
+  }
+
+  // Public method used by external authentication
+  // providers such as Google Sign-In.
+  static Future<void> saveToken(String token) async {
+    await _saveToken(token);
   }
 
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.remove(_tokenKey);
   }
 
   static Future<bool> isLoggedIn() async {
     final token = await getToken();
+
     return token != null && token.isNotEmpty;
   }
+
   static Future<bool> verifyToken() async {
-  final token = await getToken();
+    final token = await getToken();
 
-  if (token == null || token.isEmpty) {
-    return false;
+    if (token == null || token.isEmpty) {
+      return false;
+    }
+
+    final res = await http.get(
+      Uri.parse("$baseUrl/api/auth/profile/"),
+      headers: {
+        "Authorization": "Token $token",
+      },
+    );
+
+    if (res.statusCode == 200) {
+      return true;
+    }
+
+    if (res.statusCode == 401) {
+      await logout();
+
+      return false;
+    }
+
+    throw Exception("Unable to verify authentication");
   }
-
-  final res = await http.get(
-    Uri.parse("$baseUrl/api/auth/profile/"),
-    headers: {
-      "Authorization": "Token $token",
-    },
-  );
-
-  if (res.statusCode == 200) {
-    return true;
-  }
-
-  if (res.statusCode == 401) {
-    await logout();
-    return false;
-  }
-
-  throw Exception("Unable to verify authentication");
-}
 
   static Future<void> _saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.setString(_tokenKey, token);
   }
 
@@ -100,6 +118,7 @@ class AuthService {
 
       try {
         final body = jsonDecode(res.body);
+
         if (body["error"] != null) {
           message = body["error"].toString();
         }

@@ -13,7 +13,9 @@ class AssistantAgent:
         arguments: dict[str, Any] | None = None,
         confirmed: bool = False,
     ):
-        arguments = arguments or {}
+        # Copy the arguments so injecting the authenticated user
+        # does not mutate the original Ollama assistant message.
+        arguments = dict(arguments or {})
 
         if tool_name not in TOOL_REGISTRY:
             return {

@@ -1,23 +1,27 @@
-from api.models import Place
+from places.gateway import search_nearby
+from places.geoapify_provider import geocode_location
 
 
-def search_places(query=None, category=None):
-    qs = Place.objects.all()
+def search_places(
+    query=None,
+    category=None,
+    radius_km=10,
+):
+    query = str(query or "").strip()
 
-    if query:
-        qs = qs.filter(name__icontains=query)
+    if not query:
+        return []
 
-    if category:
-        qs = qs.filter(category=category)
+    location = geocode_location(query)
 
-    return list(
-        qs.values(
-            "id",
-            "name",
-            "category",
-            "latitude",
-            "longitude",
-            "description",
-            "tags",
-        )
+    if not location:
+        return []
+
+    places = search_nearby(
+        latitude=location["latitude"],
+        longitude=location["longitude"],
+        radius_km=radius_km,
+        category=category,
     )
+
+    return places

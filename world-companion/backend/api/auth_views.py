@@ -4,9 +4,17 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.http import JsonResponse
 
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
+
+
+GOOGLE_WEB_CLIENT_ID = (
+    "430750650878-v5vcbqn49lju9s71p64s135tdgqrf43f.apps.googleusercontent.com"
+)
 
 
 @api_view(["POST"])
@@ -104,6 +112,86 @@ def login_view(request):
     )
 
 
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def google_login_view(request):
+    try:
+        google_id_token = request.data["id_token"]
+    except KeyError:
+        return JsonResponse(
+            {"error": 'expected JSON body: {"id_token": "..."}'},
+            status=400,
+        )
+
+    if not google_id_token:
+        return JsonResponse(
+            {"error": "id_token is required"},
+            status=400,
+        )
+
+    try:
+        google_user = id_token.verify_oauth2_token(
+            google_id_token,
+            google_requests.Request(),
+            GOOGLE_WEB_CLIENT_ID,
+        )
+    except ValueError:
+        return JsonResponse(
+            {"error": "invalid Google ID token"},
+            status=401,
+        )
+
+    email = google_user.get("email")
+
+    if not email:
+        return JsonResponse(
+            {"error": "Google account email is unavailable"},
+            status=400,
+        )
+
+    given_name = google_user.get("given_name", "")
+    family_name = google_user.get("family_name", "")
+
+    user, created = User.objects.get_or_create(
+        username=email,
+        defaults={
+            "email": email,
+            "first_name": given_name,
+            "last_name": family_name,
+        },
+    )
+
+    if not created:
+        user.email = email
+        user.first_name = given_name
+        user.last_name = family_name
+        user.save(
+            update_fields=[
+                "email",
+                "first_name",
+                "last_name",
+            ]
+        )
+
+    token, _ = Token.objects.get_or_create(user=user)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "token": token.key,
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "name": user.get_full_name(),
+                },
+            },
+        }
+    )
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def profile_view(request):
@@ -113,6 +201,9 @@ def profile_view(request):
             "data": {
                 "id": request.user.id,
                 "username": request.user.username,
+                "first_name": request.user.first_name,
+                "last_name": request.user.last_name,
+                "name": request.user.get_full_name(),
             },
         }
     )

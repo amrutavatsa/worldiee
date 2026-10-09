@@ -2,11 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../theme/world_companion_colors.dart';
+import '../theme/world_companion_motion.dart';
+import '../theme/world_companion_radius.dart';
+import '../theme/world_companion_spacing.dart';
+import '../theme/world_companion_typography.dart';
 import 'safety_screen.dart';
 import 'bookings_screen.dart';
 import 'preferences_screen.dart';
 import 'recommendations_screen.dart';
 import 'auth_screen.dart';
+import 'app_shell.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -16,15 +22,6 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  static const Color primary = Color(0xFF0E7774);
-  static const Color deep = Color(0xFF123B43);
-  static const Color aqua = Color(0xFFDFF4F1);
-  static const Color background = Color(0xFFF7F9F8);
-  static const Color surface = Color(0xFFFFFFFF);
-  static const Color ink = Color(0xFF172326);
-  static const Color muted = Color(0xFF68777B);
-  static const Color line = Color(0xFFDCE5E4);
-
   Map<String, dynamic>? _profile;
   bool _loading = true;
   String? _error;
@@ -36,6 +33,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadProfile() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
     try {
       final token = await AuthService.getToken();
 
@@ -46,11 +50,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _loading = false;
           _error = 'Your session has expired. Please log in again.';
         });
-
         return;
       }
 
-      final response = await _fetchProfile();
+      final response = await ApiService.getProfile();
 
       if (!mounted) return;
 
@@ -59,7 +62,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _loading = false;
         _error = null;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
 
       setState(() {
@@ -69,58 +72,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<Map<String, dynamic>> _fetchProfile() async {
-    final token = await AuthService.getToken();
-
-    if (token == null) {
-      throw Exception('No authentication token found.');
-    }
-
-    final response = await ApiService.getProfile();
-
-    return response;
-  }
-
   Future<void> _logout() async {
     final shouldLogout = await showDialog<bool>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
-          backgroundColor: surface,
+          backgroundColor: WorldCompanionColors.surface,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(
+              WorldCompanionRadius.extraLarge,
+            ),
           ),
-          title: const Text(
+          title: Text(
             'Log out?',
-            style: TextStyle(
-              color: ink,
-              fontSize: 19,
-              fontWeight: FontWeight.w800,
-            ),
+            style: Theme.of(dialogContext).textTheme.titleLarge,
           ),
-          content: const Text(
-            'You can log back in anytime to continue using World Companion.',
-            style: TextStyle(
-              color: muted,
-              fontSize: 13,
-              height: 1.45,
-            ),
+          content: Text(
+            'You can log back in anytime to continue using WorldCompanion.',
+            style: Theme.of(dialogContext).textTheme.bodyMedium,
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text(
-                'Cancel',
-                style: TextStyle(
-                  color: muted,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => Navigator.pop(dialogContext, true),
               style: FilledButton.styleFrom(
-                backgroundColor: deep,
+                backgroundColor: WorldCompanionColors.deepOcean,
                 foregroundColor: Colors.white,
               ),
               child: const Text('Log out'),
@@ -133,9 +112,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (shouldLogout != true) return;
 
     await AuthService.logout();
-    
+
     if (!mounted) return;
-    
+
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
         builder: (_) => const AuthScreen(),
@@ -144,27 +123,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  String get _username {
-    return _profile?['username']?.toString() ?? 'Traveler';
+  String get _name {
+    final name = _profile?['name']?.toString().trim();
+
+    if (name != null && name.isNotEmpty) {
+      return name;
+    }
+
+    final firstName = _profile?['first_name']?.toString().trim() ?? '';
+    final lastName = _profile?['last_name']?.toString().trim() ?? '';
+    final fallbackName = '$firstName $lastName'.trim();
+
+    return fallbackName.isNotEmpty ? fallbackName : 'Traveler';
   }
 
-  String get _userId {
-    return _profile?['id']?.toString() ?? '—';
-  }
+  String get _email => _profile?['username']?.toString() ?? '—';
+
+  String get _userId => _profile?['id']?.toString() ?? '—';
 
   String get _initial {
-    if (_username.trim().isEmpty) return 'W';
-
-    return _username.trim()[0].toUpperCase();
+    final name = _name.trim();
+    return name.isEmpty ? 'W' : name[0].toUpperCase();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: WorldCompanionColors.mapSurface,
       body: SafeArea(
         child: RefreshIndicator(
-          color: primary,
+          color: WorldCompanionColors.oceanBlue,
           onRefresh: _loadProfile,
           child: CustomScrollView(
             physics: const BouncingScrollPhysics(
@@ -173,36 +161,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
             slivers: [
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                    WorldCompanionSpacing.mobilePage,
+                    WorldCompanionSpacing.md,
+                    WorldCompanionSpacing.mobilePage,
+                    0,
+                  ),
                   child: _buildHeader(),
                 ),
               ),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                    WorldCompanionSpacing.mobilePage,
+                    WorldCompanionSpacing.lg,
+                    WorldCompanionSpacing.mobilePage,
+                    0,
+                  ),
                   child: _buildProfileCard(),
                 ),
               ),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 30, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                    WorldCompanionSpacing.mobilePage,
+                    WorldCompanionSpacing.xl,
+                    WorldCompanionSpacing.mobilePage,
+                    0,
+                  ),
                   child: _buildTravelHubHeader(),
                 ),
               ),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                    WorldCompanionSpacing.mobilePage,
+                    WorldCompanionSpacing.md,
+                    WorldCompanionSpacing.mobilePage,
+                    0,
+                  ),
                   child: _buildModuleGrid(),
                 ),
               ),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 30, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                    WorldCompanionSpacing.mobilePage,
+                    WorldCompanionSpacing.xl,
+                    WorldCompanionSpacing.mobilePage,
+                    0,
+                  ),
                   child: _buildAccountSection(),
                 ),
               ),
               const SliverToBoxAdapter(
-                child: SizedBox(height: 30),
+                child: SizedBox(height: WorldCompanionSpacing.xxxl),
               ),
             ],
           ),
@@ -215,49 +228,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Row(
       children: [
         IconButton(
-          tooltip: 'Back',
-          onPressed: () {
-            Navigator.pop(context);
-          },
-          icon: const Icon(
-            Icons.arrow_back_rounded,
-            color: deep,
-            size: 24,
-          ),
+          tooltip: 'Back to home',
+          onPressed: () => AppShellNavigation.of(context).goHome(),
+          icon: const Icon(Icons.arrow_back_rounded),
         ),
-        const SizedBox(width: 2),
+        const SizedBox(width: WorldCompanionSpacing.xs),
         Container(
-          width: 42,
-          height: 42,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
-            color: primary,
-            borderRadius: BorderRadius.circular(14),
+            color: WorldCompanionColors.deepOcean,
+            borderRadius: BorderRadius.circular(
+              WorldCompanionRadius.medium,
+            ),
           ),
           child: const Icon(
             Icons.person_rounded,
             color: Colors.white,
-            size: 22,
+            size: 23,
           ),
         ),
-        const SizedBox(width: 12),
-        const Expanded(
-          child: Text(
-            'PROFILE',
-            style: TextStyle(
-              color: deep,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.9,
-            ),
+        const SizedBox(width: WorldCompanionSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'WORLD COMPANION',
+                style: WorldCompanionTypography.brand,
+              ),
+              const SizedBox(height: WorldCompanionSpacing.xxs),
+              Text(
+                'Your profile',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ),
         ),
         IconButton(
           tooltip: 'Refresh profile',
           onPressed: _loading ? null : _loadProfile,
-          icon: const Icon(
-            Icons.refresh_rounded,
-            color: deep,
-          ),
+          icon: const Icon(Icons.refresh_rounded),
         ),
       ],
     );
@@ -266,15 +277,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildProfileCard() {
     if (_loading) {
       return Container(
-        height: 155,
-        decoration: BoxDecoration(
-          color: surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: line),
-        ),
+        height: 174,
+        decoration: _cardDecoration(),
         child: const Center(
           child: CircularProgressIndicator(
-            color: primary,
+            color: WorldCompanionColors.oceanBlue,
           ),
         ),
       );
@@ -282,49 +289,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (_error != null) {
       return Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: surface,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: line),
-        ),
+        padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
+        decoration: _cardDecoration(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Icon(
               Icons.person_off_outlined,
-              color: muted,
-              size: 28,
+              color: WorldCompanionColors.mutedText,
+              size: 30,
             ),
-            const SizedBox(height: 12),
-            const Text(
+            const SizedBox(height: WorldCompanionSpacing.md),
+            Text(
               'Profile unavailable',
-              style: TextStyle(
-                color: ink,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: WorldCompanionSpacing.xs),
             Text(
               _error!,
-              style: const TextStyle(
-                color: muted,
-                fontSize: 12,
-                height: 1.4,
-              ),
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
-            const SizedBox(height: 14),
-            OutlinedButton(
+            const SizedBox(height: WorldCompanionSpacing.md),
+            OutlinedButton.icon(
               onPressed: _loadProfile,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: primary,
-                side: const BorderSide(color: primary),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(13),
-                ),
-              ),
-              child: const Text('Try again'),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Try again'),
             ),
           ],
         ),
@@ -332,78 +321,87 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
+          colors: [
+            WorldCompanionColors.deepOcean,
+            WorldCompanionColors.oceanBlue,
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            deep,
-            primary,
-          ],
         ),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(
+          WorldCompanionRadius.extraLarge,
+        ),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x16123B43),
-            blurRadius: 22,
-            offset: Offset(0, 10),
+            color: Color(0x180B2545),
+            blurRadius: 20,
+            offset: Offset(0, 8),
           ),
         ],
       ),
       child: Row(
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: 68,
+            height: 68,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.14),
+              color: Colors.white.withOpacity(0.12),
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withOpacity(0.18),
+                color: Colors.white.withOpacity(0.25),
               ),
             ),
-            child: Center(
-              child: Text(
-                _initial,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 25,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+            alignment: Alignment.center,
+            child: Text(
+              _initial,
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    color: Colors.white,
+                  ),
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: WorldCompanionSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Your World Companion',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 5),
                 Text(
-                  _username,
-                  maxLines: 1,
+                  'YOUR WORLD COMPANION',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.white.withOpacity(0.75),
+                        letterSpacing: 1,
+                      ),
+                ),
+                const SizedBox(height: WorldCompanionSpacing.xs),
+                Text(
+                  _name,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: WorldCompanionTypography.editorial.copyWith(
                     color: Colors.white,
-                    fontSize: 21,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 27,
+                    height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'Traveler ID  $_userId',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.68),
-                    fontSize: 11,
+                const SizedBox(height: WorldCompanionSpacing.sm),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: WorldCompanionSpacing.sm,
+                    vertical: WorldCompanionSpacing.xxs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(
+                      WorldCompanionRadius.pill,
+                    ),
+                  ),
+                  child: Text(
+                    'Traveler ID  $_userId',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Colors.white.withOpacity(0.9),
+                        ),
                   ),
                 ),
               ],
@@ -415,26 +413,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildTravelHubHeader() {
-    return const Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Your travel hub',
-          style: TextStyle(
-            color: ink,
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.3,
-          ),
+          style: Theme.of(context).textTheme.headlineMedium,
         ),
-        SizedBox(height: 6),
+        const SizedBox(height: WorldCompanionSpacing.xs),
         Text(
-          'Manage your journey, preferences, safety and stays.',
-          style: TextStyle(
-            color: muted,
-            fontSize: 13,
-            height: 1.4,
-          ),
+          'Your journey, preferences, safety and stays in one place.',
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
       ],
     );
@@ -444,152 +433,71 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 650;
+        final crossAxisCount = isWide ? 4 : 2;
 
-        if (isWide) {
-          return GridView.count(
-            crossAxisCount: 4,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 1.0,
-            children: [
-              _moduleCard(
-                icon: Icons.shield_outlined,
-                title: 'Safety',
-                subtitle: 'Emergency contacts & SOS',
-                iconBackground: const Color(0xFFE8F5F4),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SafetyScreen(),
-                    ),
-                  );
-                },
-              ),
-              _moduleCard(
-                icon: Icons.tune_rounded,
-                title: 'Preferences',
-                subtitle: 'Travel style',
-                iconBackground: const Color(0xFFFFEEE8),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const PreferencesScreen(),
-                    ),
-                  );
-                },
-              ),
-              _moduleCard(
-                icon: Icons.auto_awesome_rounded,
-                title: 'Recommendations',
-                subtitle: 'For your journey',
-                iconBackground: const Color(0xFFEAF3F7),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const RecommendationsScreen(),
-                    ),
-                  );
-                },
-              ),
-              _moduleCard(
-                icon: Icons.receipt_long_outlined,
-                title: 'Bookings',
-                subtitle: 'Booking history',
-                iconBackground: const Color(0xFFF2EEE8),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const BookingsScreen(),
-                    ),
-                  );
-                },
-              ),
-            ],
-          );
-        }
-
-        return Column(
+        return GridView.count(
+          crossAxisCount: crossAxisCount,
+          crossAxisSpacing: WorldCompanionSpacing.sm,
+          mainAxisSpacing: WorldCompanionSpacing.sm,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          childAspectRatio: isWide ? 0.92 : 1.05,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: _moduleCard(
-                    icon: Icons.shield_outlined,
-                    title: 'Safety',
-                    subtitle: 'Contacts & safety',
-                    iconBackground: aqua,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const SafetyScreen(),
-                        ),
-                      );
-                    },
+            _moduleCard(
+              icon: Icons.shield_outlined,
+              title: 'Safety',
+              subtitle: 'Emergency contacts and SOS',
+              iconBackground: WorldCompanionColors.successSurface,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const SafetyScreen(),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _moduleCard(
-                    icon: Icons.tune_rounded,
-                    title: 'Preferences',
-                    subtitle: 'Travel style',
-                    iconBackground: const Color(0xFFFFEEE8),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const PreferencesScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+                );
+              },
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _moduleCard(
-                    icon: Icons.auto_awesome_rounded,
-                    title: 'Recommendations',
-                    subtitle: 'For your journey',
-                    iconBackground: const Color(0xFFEAF3F7),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const RecommendationsScreen(),
-                        ),
-                      );
-                    },
+            _moduleCard(
+              icon: Icons.tune_rounded,
+              title: 'Preferences',
+              subtitle: 'Your travel style',
+              iconBackground: WorldCompanionColors.warningSurface,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PreferencesScreen(),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _moduleCard(
-                    icon: Icons.receipt_long_outlined,
-                    title: 'Bookings',
-                    subtitle: 'Booking history',
-                    iconBackground: const Color(0xFFF2EEE8),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const BookingsScreen(),
-                        ),
-                      );
-                    },
+                );
+              },
+            ),
+            _moduleCard(
+              icon: Icons.auto_awesome_rounded,
+              title: 'Recommendations',
+              subtitle: 'Ideas for your journey',
+              iconBackground: WorldCompanionColors.infoSurface,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const RecommendationsScreen(),
                   ),
-                ),
-              ],
+                );
+              },
+            ),
+            _moduleCard(
+              icon: Icons.receipt_long_outlined,
+              title: 'Bookings',
+              subtitle: 'Your booking history',
+              iconBackground: WorldCompanionColors.aiSurface,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const BookingsScreen(),
+                  ),
+                );
+              },
             ),
           ],
         );
@@ -605,27 +513,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required VoidCallback onTap,
   }) {
     return Material(
-      color: surface,
-      borderRadius: BorderRadius.circular(20),
+      color: WorldCompanionColors.surface,
+      borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          constraints: const BoxConstraints(
-            minHeight: 145,
-          ),
-          padding: const EdgeInsets.all(16),
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
+        child: AnimatedContainer(
+          duration: WorldCompanionMotion.standard,
+          curve: WorldCompanionMotion.standardCurve,
+          padding: const EdgeInsets.all(WorldCompanionSpacing.md),
           decoration: BoxDecoration(
-            color: surface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: line,
+            borderRadius: BorderRadius.circular(
+              WorldCompanionRadius.large,
             ),
+            border: Border.all(color: WorldCompanionColors.border),
             boxShadow: const [
               BoxShadow(
-                color: Color(0x08123B43),
-                blurRadius: 14,
-                offset: Offset(0, 6),
+                color: Color(0x080B2545),
+                blurRadius: 12,
+                offset: Offset(0, 4),
               ),
             ],
           ),
@@ -633,33 +539,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
                   color: iconBackground,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(
+                    WorldCompanionRadius.medium,
+                  ),
                 ),
                 child: Icon(
                   icon,
-                  color: primary,
-                  size: 22,
+                  color: WorldCompanionColors.oceanBlue,
+                  size: 23,
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: WorldCompanionSpacing.md),
               Text(
                 title,
-                style: const TextStyle(
-                  color: ink,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: WorldCompanionSpacing.xxs),
+              Expanded(
+                child: Text(
+                  subtitle,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  color: muted,
-                  fontSize: 11,
+              const Align(
+                alignment: Alignment.bottomRight,
+                child: Icon(
+                  Icons.arrow_outward_rounded,
+                  color: WorldCompanionColors.mutedText,
+                  size: 17,
                 ),
               ),
             ],
@@ -673,81 +588,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Account',
-          style: TextStyle(
-            color: ink,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
+          style: Theme.of(context).textTheme.headlineSmall,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: WorldCompanionSpacing.md),
         Container(
-          decoration: BoxDecoration(
-            color: surface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: line,
-            ),
-          ),
+          decoration: _cardDecoration(),
           child: Column(
             children: [
               _accountTile(
                 icon: Icons.person_outline_rounded,
-                title: 'Username',
-                value: _username,
+                title: 'Name',
+                value: _name,
               ),
-              const Divider(
-                height: 1,
-                indent: 56,
-                color: line,
+              _accountDivider(),
+              _accountTile(
+                icon: Icons.email_outlined,
+                title: 'Email / username',
+                value: _email,
               ),
+              _accountDivider(),
               _accountTile(
                 icon: Icons.badge_outlined,
                 title: 'Traveler ID',
                 value: _userId,
               ),
-              const Divider(
-                height: 1,
-                indent: 56,
-                color: line,
-              ),
+              _accountDivider(),
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 5,
+                  horizontal: WorldCompanionSpacing.md,
+                  vertical: WorldCompanionSpacing.xs,
                 ),
-                leading: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFEEEE),
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: const Icon(
-                    Icons.logout_rounded,
-                    color: Color(0xFFC94B4B),
-                    size: 20,
-                  ),
+                leading: _accountIcon(
+                  Icons.logout_rounded,
+                  WorldCompanionColors.errorSurface,
+                  WorldCompanionColors.error,
                 ),
-                title: const Text(
+                title: Text(
                   'Log out',
-                  style: TextStyle(
-                    color: Color(0xFFC94B4B),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: WorldCompanionColors.error,
+                      ),
                 ),
-                subtitle: const Text(
+                subtitle: Text(
                   'Sign out of this account',
-                  style: TextStyle(
-                    color: muted,
-                    fontSize: 11,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
                 trailing: const Icon(
                   Icons.chevron_right_rounded,
-                  color: muted,
+                  color: WorldCompanionColors.mutedText,
                 ),
                 onTap: _logout,
               ),
@@ -758,6 +648,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Widget _accountDivider() {
+    return const Divider(
+      height: 1,
+      indent: 68,
+      color: WorldCompanionColors.border,
+    );
+  }
+
+  Widget _accountIcon(
+    IconData icon,
+    Color background,
+    Color foreground,
+  ) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(WorldCompanionRadius.medium),
+      ),
+      child: Icon(
+        icon,
+        color: foreground,
+        size: 21,
+      ),
+    );
+  }
+
   Widget _accountTile({
     required IconData icon,
     required String title,
@@ -765,38 +683,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 5,
+        horizontal: WorldCompanionSpacing.md,
+        vertical: WorldCompanionSpacing.xs,
       ),
-      leading: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: aqua,
-          borderRadius: BorderRadius.circular(11),
-        ),
-        child: Icon(
-          icon,
-          color: primary,
-          size: 20,
-        ),
+      leading: _accountIcon(
+        icon,
+        WorldCompanionColors.infoSurface,
+        WorldCompanionColors.oceanBlue,
       ),
       title: Text(
         title,
-        style: const TextStyle(
-          color: muted,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
+        style: Theme.of(context).textTheme.bodySmall,
       ),
       subtitle: Text(
         value,
-        style: const TextStyle(
-          color: ink,
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-        ),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.titleSmall,
       ),
+    );
+  }
+
+  BoxDecoration _cardDecoration() {
+    return BoxDecoration(
+      color: WorldCompanionColors.surface,
+      borderRadius: BorderRadius.circular(WorldCompanionRadius.extraLarge),
+      border: Border.all(color: WorldCompanionColors.border),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x080B2545),
+          blurRadius: 14,
+          offset: Offset(0, 5),
+        ),
+      ],
     );
   }
 }
