@@ -1,4 +1,4 @@
-import json
+﻿import json
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
@@ -134,6 +134,7 @@ def google_login_view(request):
             google_id_token,
             google_requests.Request(),
             GOOGLE_WEB_CLIENT_ID,
+            clock_skew_in_seconds=5,
         )
     except ValueError:
         return JsonResponse(
@@ -207,3 +208,7 @@ def profile_view(request):
             },
         }
     )
+
+
+
+

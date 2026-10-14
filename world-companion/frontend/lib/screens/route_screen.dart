@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../services/api_service.dart';
 import '../theme/world_companion_colors.dart';
@@ -19,6 +20,8 @@ class RouteScreen extends StatefulWidget {
 class _RouteScreenState extends State<RouteScreen> {
   Map<String, dynamic>? _pois;
   String? _startId;
+  double? _currentLatitude;
+  double? _currentLongitude;
 
   final Set<String> _selectedStops = {};
 
@@ -42,50 +45,95 @@ class _RouteScreenState extends State<RouteScreen> {
     });
 
     try {
-      final pois = await ApiService.getPois();
-
-      if (!mounted) return;
-
-      if (pois.isEmpty) {
-        setState(() {
-          _pois = pois;
-          _startId = null;
-          _selectedStops.clear();
-          _routeResult = null;
-          _loading = false;
-          _error = 'No places are available for route planning.';
-        });
-        return;
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Enable device location services and try again.');
       }
 
-      setState(() {
-        _pois = pois;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission is required for route planning.');
+      }
 
-        if (_startId == null || !pois.containsKey(_startId)) {
-          _startId = pois.keys.first;
-        }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
 
-        _selectedStops.removeWhere(
-          (id) => id == _startId || !pois.containsKey(id),
+      final nearby = await ApiService.getNearbyPlaces(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        radiusKm: 10.0,
+      );
+
+      final places = <String, dynamic>{
+        '__current_location__': <String, dynamic>{
+          'name': 'My current location',
+          'category': 'Current location',
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+        },
+      };
+
+      for (final raw in nearby) {
+        if (raw is! Map) continue;
+        final place = Map<String, dynamic>.from(raw);
+        final lat = double.tryParse(
+          (place['latitude'] ?? '').toString(),
         );
+        final lon = double.tryParse(
+          (place['longitude'] ?? '').toString(),
+        );
+        if (lat == null || lon == null) continue;
 
+        final providerId = place['id']?.toString();
+        final id = providerId != null && providerId.isNotEmpty
+            ? providerId
+            : '${place['name'] ?? 'place'}_${lat}_$lon';
+
+        if (id == '__current_location__') continue;
+        places[id] = place;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _currentLatitude = position.latitude;
+        _currentLongitude = position.longitude;
+        _pois = places;
+        _startId = '__current_location__';
+        _selectedStops.removeWhere((id) => !places.containsKey(id) ||
+            id == '__current_location__');
         _routeResult = null;
         _loading = false;
-        _error = null;
+        _error = places.length == 1
+            ? 'No nearby destinations were found within 10 km.'
+            : null;
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-
       setState(() {
-        _error = 'Unable to load places for route planning.';
+        _pois = null;
+        _startId = null;
+        _selectedStops.clear();
+        _routeResult = null;
+        _error = error.toString().replaceFirst('Exception: ', '');
         _loading = false;
       });
     }
   }
 
   Future<void> _computeRoute() async {
-    if (_startId == null || _selectedStops.isEmpty) {
-      _showMessage('Select at least one place to create a route.');
+    if (_currentLatitude == null || _currentLongitude == null) {
+      _showMessage('Your current location is not available. Try again.');
+      return;
+    }
+    if (_selectedStops.isEmpty) {
+      _showMessage('Select at least one destination.');
       return;
     }
 
@@ -96,40 +144,66 @@ class _RouteScreenState extends State<RouteScreen> {
     });
 
     try {
-      final result = await ApiService.optimizeRoute(
-        _startId!,
-        _selectedStops.toList(),
-      );
+      var fromLatitude = _currentLatitude!;
+      var fromLongitude = _currentLongitude!;
+      var fromName = 'My current location';
+      var totalDistance = 0.0;
+      final hops = <Map<String, dynamic>>[];
+
+      for (final id in _selectedStops.toList()) {
+        final place = _asStringMap(_pois?[id]);
+        final toLatitude = double.tryParse(
+          (place['latitude'] ?? '').toString(),
+        );
+        final toLongitude = double.tryParse(
+          (place['longitude'] ?? '').toString(),
+        );
+        if (toLatitude == null || toLongitude == null) continue;
+
+        final toName = place['name']?.toString() ?? id;
+        final segment = await ApiService.getRealWorldRoute(
+          startLatitude: fromLatitude,
+          startLongitude: fromLongitude,
+          destinationLatitude: toLatitude,
+          destinationLongitude: toLongitude,
+        );
+
+        final distance = double.tryParse(
+          (segment['distance_km'] ?? '').toString(),
+        ) ?? 0.0;
+        totalDistance += distance;
+        hops.add({
+          'from_name': fromName,
+          'to_name': toName,
+          'distance_km': distance,
+        });
+
+        fromLatitude = toLatitude;
+        fromLongitude = toLongitude;
+        fromName = toName;
+      }
+
+      if (hops.isEmpty) {
+        throw Exception('The selected destinations have no valid coordinates.');
+      }
 
       if (!mounted) return;
-
       setState(() {
-        _routeResult = result;
+        _routeResult = {
+          'total_distance_km': totalDistance,
+          'hops': hops,
+        };
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-
       setState(() {
-        _error = 'Unable to calculate the optimized route.';
+        _error = 'Unable to calculate the route. ${error.toString().replaceFirst('Exception: ', '')}';
       });
     } finally {
       if (mounted) {
-        setState(() {
-          _computingRoute = false;
-        });
+        setState(() => _computingRoute = false);
       }
     }
-  }
-
-  void _changeStartPoint(String? value) {
-    if (value == null || value == _startId) return;
-
-    setState(() {
-      _startId = value;
-      _selectedStops.remove(value);
-      _routeResult = null;
-      _error = null;
-    });
   }
 
   void _toggleStop(String placeId, bool selected) {
@@ -333,14 +407,11 @@ class _RouteScreenState extends State<RouteScreen> {
           ),
         ],
       ),
-      child: const WorldMap(),
+      child: const WorldMap(showPoiMarkers: false),
     );
   }
 
   Widget _buildStartPointCard(ThemeData theme) {
-    final pois = _pois!;
-    final currentStart = _startId == null ? null : pois[_startId];
-
     return _SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -348,70 +419,43 @@ class _RouteScreenState extends State<RouteScreen> {
           _buildSectionTitle(
             icon: Icons.trip_origin_rounded,
             title: 'Starting point',
-            subtitle: 'Where your journey begins',
+            subtitle: 'Your current GPS location',
           ),
           const SizedBox(height: WorldCompanionSpacing.md),
           Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: WorldCompanionSpacing.md,
-              vertical: WorldCompanionSpacing.xxs,
-            ),
+            padding: const EdgeInsets.all(WorldCompanionSpacing.md),
             decoration: BoxDecoration(
               color: WorldCompanionColors.aiSurface,
-              borderRadius: BorderRadius.circular(
-                WorldCompanionRadius.medium,
-              ),
-              border: Border.all(
-                color: WorldCompanionColors.border,
-              ),
+              borderRadius: BorderRadius.circular(WorldCompanionRadius.medium),
+              border: Border.all(color: WorldCompanionColors.border),
             ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _startId,
-                isExpanded: true,
-                icon: const Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: WorldCompanionColors.oceanBlue,
-                ),
-                borderRadius: BorderRadius.circular(
-                  WorldCompanionRadius.medium,
-                ),
-                items: pois.entries.map((entry) {
-                  final place = _asStringMap(entry.value);
-                  final name = place['name']?.toString() ?? entry.key;
-
-                  return DropdownMenuItem<String>(
-                    value: entry.key,
-                    child: Text(
-                      name,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  );
-                }).toList(),
-                onChanged: _changeStartPoint,
-              ),
-            ),
-          ),
-          if (currentStart is Map) ...[
-            const SizedBox(height: WorldCompanionSpacing.sm),
-            Row(
+            child: Row(
               children: [
                 const Icon(
-                  Icons.location_on_outlined,
-                  size: 18,
-                  color: WorldCompanionColors.mutedText,
+                  Icons.my_location_rounded,
+                  color: WorldCompanionColors.oceanBlue,
                 ),
-                const SizedBox(width: WorldCompanionSpacing.xs),
+                const SizedBox(width: WorldCompanionSpacing.sm),
                 Expanded(
                   child: Text(
-                    currentStart['category']?.toString() ?? 'Destination',
-                    style: theme.textTheme.bodySmall,
+                    'My current location',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
+                const Icon(
+                  Icons.gps_fixed_rounded,
+                  color: WorldCompanionColors.success,
+                ),
               ],
+            ),
+          ),
+          if (_currentLatitude != null && _currentLongitude != null) ...[
+            const SizedBox(height: WorldCompanionSpacing.xs),
+            Text(
+              '${_currentLatitude!.toStringAsFixed(5)}, ${_currentLongitude!.toStringAsFixed(5)}',
+              style: theme.textTheme.bodySmall,
             ),
           ],
         ],
@@ -1054,3 +1098,4 @@ class _SummaryItem extends StatelessWidget {
     );
   }
 }
+

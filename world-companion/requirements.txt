@@ -1,15 +1,31 @@
-# World Companion — Backend Dependencies
-# Install with: pip install -r requirements.txt
-#
-# Versions are pinned to minimums known to work together for this project.
-# If a fresh install pulls a much newer major version and something breaks,
-# try pinning to the exact version shown here (e.g. django==6.1).
 
-django>=5.0            # Web framework + ORM (backend/config, backend/api)
-djangorestframework>=3.15   # REST response handling (backend/api/views.py)
-networkx>=3.2           # Graph structure + A* search (backend/core/routing.py)
-scikit-learn>=1.4        # Intent classifier: TF-IDF + Logistic Regression (backend/ml/intent_classifier.py)
-joblib>=1.3             # Saves/loads the trained intent model (data/intent_model.joblib)
+# WorldCompanion — Backend Dependencies
+# Recommended Python: 3.11
+# Install with: python -m pip install -r requirements.txt
 
-# Not required yet, but referenced in code for future setup — see DEPLOY.md Section 11:
-# vosk              # Offline speech-to-text (backend/ml/speech_to_text.py) — install once you set up voice input
+# Django API and middleware
+Django>=5.0,<6.0
+djangorestframework>=3.15,<4.0
+django-cors-headers>=4.4,<5.0
+
+# Routing and intent classification
+networkx>=3.2,<4.0
+scikit-learn>=1.4,<2.0
+joblib>=1.3,<2.0
+
+# External HTTP requests and environment configuration
+requests>=2.32,<3.0
+python-dotenv>=1.0,<2.0
+
+# Google ID token verification
+google-auth>=2.0,<3.0
+
+# Production server — Linux/Render only
+gunicorn>=22.0,<24.0; sys_platform != "win32"
+
+dj-database-url>=2.2,<3.0
+psycopg[binary]>=3.2,<4.0
+whitenoise>=6.7,<7.0
+
+# Optional: install only if offline speech recognition is implemented
+# vosk

@@ -25,11 +25,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _profile;
   bool _loading = true;
   String? _error;
+  String? _photoUrl;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
+    _loadGooglePhoto();
+  }
+  Future<void> _loadGooglePhoto() async {
+    final url = await AuthService.getGooglePhotoUrl();
+    if (!mounted) return;
+    setState(() => _photoUrl = url);
   }
 
   Future<void> _loadProfile() async {
@@ -355,12 +362,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             alignment: Alignment.center,
-            child: Text(
-              _initial,
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    color: Colors.white,
+            child: _photoUrl != null && _photoUrl!.isNotEmpty
+                ? ClipOval(
+                    child: Image.network(
+                      _photoUrl!,
+                      width: 68,
+                      height: 68,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Text(
+                        _initial,
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: Colors.white),
+                      ),
+                    ),
+                  )
+                : Text(
+                    _initial,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: Colors.white),
                   ),
-            ),
           ),
           const SizedBox(width: WorldCompanionSpacing.md),
           Expanded(

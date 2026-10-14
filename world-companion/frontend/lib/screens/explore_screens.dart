@@ -1,378 +1,888 @@
-
+﻿
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../services/api_service.dart';
-import '../theme/world_companion_colors.dart';
-import '../theme/world_companion_elevation.dart';
-import '../theme/world_companion_motion.dart';
-import '../theme/world_companion_radius.dart';
-import '../theme/world_companion_spacing.dart';
-import '../theme/world_companion_typography.dart';
 import '../widgets/world_map.dart';
-import 'app_shell.dart';
 import 'place_details_screen.dart';
 
 class ExploreScreen extends StatefulWidget {
-  final bool routeMode;
-
-  const ExploreScreen({
-    super.key,
-    this.routeMode = false,
-  });
+  const ExploreScreen({super.key});
 
   @override
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
 class _ExploreScreenState extends State<ExploreScreen> {
-  Map<String, dynamic> _pois = {};
-  bool _loading = true;
-  String? _error;
-
-  String _searchQuery = '';
-  String _selectedCategory = 'All';
+  static const Color _primary = Color(0xFF0B2545);
+  static const Color _secondary = Color(0xFF134074);
+  static const Color _surface = Color(0xFFEEF4ED);
+  static const Color _chipBackground = Color(0xFFEAF0F7);
 
   static const List<String> _categories = [
     'All',
     'Parks',
     'Food',
+    'Stays',
     'Shopping',
     'Landmarks',
     'Areas',
   ];
 
-  TextTheme get _textTheme => WorldCompanionTypography.textTheme;
+  // These values are sent to the existing Django nearby endpoint.
+  // They must match the category keys accepted by the backend view.
+  static const Map<String, String> _apiCategoryMap = {
+    'Parks': 'park',
+    'Food': 'food',
+    'Stays': 'hotel',
+    'Shopping': 'shopping',
+    'Landmarks': 'landmark',
+  };
+
+  final TextEditingController _searchController =
+      TextEditingController();
+
+  final ScrollController _cardsController = ScrollController();
+
+  List<Map<String, dynamic>> _nearbyPlaces = [];
+  Position? _currentPosition;
+
+  String _selectedCategory = 'All';
+  String _loadedForCategory = 'All';
+  String _searchQuery = '';
+  String? _errorMessage;
+
+  bool _isLoading = true;
+  int _requestId = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadPois();
+    _loadNearbyPlaces(category: 'All');
   }
 
-  Future<void> _loadPois() async {
+  @override
+  void dispose() {
+    // Invalidate pending requests before disposing the screen.
+    _requestId++;
+    _searchController.dispose();
+    _cardsController.dispose();
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Nearby places
+  // ---------------------------------------------------------------------------
+
+  Future<void> _loadNearbyPlaces({String? category}) async {
+    if (!mounted) return;
+
+    final requestedCategory = category ?? _selectedCategory;
+    final requestId = ++_requestId;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _nearbyPlaces = [];
+    });
+
     try {
-      final data = await ApiService.getPois();
+      final serviceEnabled =
+          await Geolocator.isLocationServiceEnabled();
 
-      if (!mounted) return;
+      if (!serviceEnabled) {
+        throw Exception(
+          'Enable GPS or location services to discover nearby places.',
+        );
+      }
+
+      var permission = await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw Exception(
+          'Location permission is unavailable. Enable location access '
+          'in your device or browser settings.',
+        );
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+
+      if (!mounted || requestId != _requestId) return;
 
       setState(() {
-        _pois = data;
-        _loading = false;
-        _error = null;
+        _currentPosition = position;
       });
-    } catch (e) {
-      if (!mounted) return;
+
+      final apiCategory = _apiCategoryMap[requestedCategory];
+
+      debugPrint(
+        '[Explore] Requesting category: $requestedCategory',
+      );
+      debugPrint(
+        '[Explore] API category parameter: '
+        '${apiCategory ?? "none (all places)"}',
+      );
+      debugPrint(
+        '[Explore] Coordinates: '
+        '${position.latitude}, ${position.longitude}',
+      );
+
+      // Real-world nearby places only.
+      // Do not merge in ApiService.getPois(), which contains predefined POIs.
+      //
+      // Areas uses the unfiltered nearby result and filters it locally because
+      // it does not have a dedicated category entry in _apiCategoryMap.
+      final response = await ApiService.getNearbyPlaces(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        radiusKm: 10.0,
+        category: apiCategory,
+      );
+
+      if (!mounted || requestId != _requestId) return;
+
+      final normalizedPlaces = response
+          .whereType<Map>()
+          .map(
+            (item) => _normalizePlace(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .where(_isUsablePlace)
+          .toList();
+
+      final uniquePlaces = _deduplicatePlaces(normalizedPlaces);
+
+      debugPrint(
+        '[Explore] Raw API result count: ${response.length}',
+      );
+      debugPrint(
+        '[Explore] Usable unique places: ${uniquePlaces.length}',
+      );
+      debugPrint(
+        '[Explore] Results: '
+        '${uniquePlaces.map(_placeName).toList()}',
+      );
 
       setState(() {
-        _loading = false;
-        _error = e.toString();
+        _nearbyPlaces = uniquePlaces;
+        _loadedForCategory = requestedCategory;
+        _isLoading = false;
+
+        _errorMessage = uniquePlaces.isEmpty
+            ? requestedCategory == 'All'
+                ? 'The nearby API returned no usable places. '
+                    'Try refreshing or check your location.'
+                : 'The API returned no places for $requestedCategory. '
+                    'Try All or refresh.'
+            : null;
+      });
+    } catch (error, stackTrace) {
+      debugPrint('[Explore] Nearby request error: $error');
+      debugPrint('$stackTrace');
+
+      if (!mounted || requestId != _requestId) return;
+
+      setState(() {
+        _nearbyPlaces = [];
+        _loadedForCategory = requestedCategory;
+        _isLoading = false;
+        _errorMessage = _friendlyError(error);
       });
     }
   }
 
-  List<MapEntry<String, dynamic>> get _filteredPois {
-    final query = _searchQuery.trim().toLowerCase();
+  String _friendlyError(Object error) {
+    final message =
+        error.toString().replaceFirst('Exception: ', '').trim();
 
-    return _pois.entries.where((entry) {
-      if (entry.value is! Map) return false;
+    if (message.contains('SocketException') ||
+        message.contains('Failed host lookup')) {
+      return 'Cannot reach the nearby places service. '
+          'Check your internet connection and API address.';
+    }
 
-      final place = Map<String, dynamic>.from(entry.value);
-      final name = place['name']?.toString().toLowerCase() ?? '';
-      final category = place['category']?.toString().toLowerCase() ?? '';
+    if (message.contains('TimeoutException') ||
+        message.contains('timed out')) {
+      return 'The nearby places service timed out. Please try again.';
+    }
 
-      final matchesSearch =
-          query.isEmpty ||
-          name.contains(query) ||
-          category.contains(query);
+    if (message.contains('API error 401') ||
+        message.contains('API error 403')) {
+      return 'The nearby places service rejected the request. '
+          'Check authentication and backend permissions.';
+    }
 
-      if (_selectedCategory == 'All') {
-        return matchesSearch;
+    return message.isEmpty
+        ? 'Could not load nearby places.'
+        : message;
+  }
+
+  // The existing ApiService returns List<dynamic>, with each item expected
+  // to be a place object. This normalizer also supports GeoJSON Features.
+  Map<String, dynamic> _normalizePlace(
+    Map<String, dynamic> source,
+  ) {
+    final properties = source['properties'];
+
+    if (properties is Map) {
+      final place = Map<String, dynamic>.from(properties);
+
+      // Preserve useful fields that may exist on the outer Feature.
+      place.putIfAbsent('id', () => source['id']);
+      place['_geometry'] = source['geometry'];
+      place['_source'] = 'nearby';
+
+      return place;
+    }
+
+    source['_source'] = 'nearby';
+    return source;
+  }
+
+  bool _isUsablePlace(Map<String, dynamic> place) {
+    if (_placeName(place).trim().isEmpty) return false;
+
+    final coordinates = _coordinates(place);
+
+    return _firstString(place, [
+          'place_id',
+          'placeId',
+          'provider_id',
+          'geoapify_id',
+          'fsq_id',
+          'id',
+        ]).isNotEmpty ||
+        coordinates != null ||
+        _placeAddress(place).isNotEmpty;
+  }
+
+  List<Map<String, dynamic>> _deduplicatePlaces(
+    List<Map<String, dynamic>> places,
+  ) {
+    final seen = <String>{};
+    final result = <Map<String, dynamic>>[];
+
+    for (final place in places) {
+      final id = _firstString(place, [
+        'place_id',
+        'placeId',
+        'provider_id',
+        'geoapify_id',
+        'fsq_id',
+        'id',
+      ]);
+
+      final coordinates = _coordinates(place);
+
+      final key = id.isNotEmpty
+          ? 'id:${id.toLowerCase()}'
+          : coordinates != null
+              ? 'geo:${coordinates.$1.toStringAsFixed(5)},'
+                  '${coordinates.$2.toStringAsFixed(5)}'
+              : 'name:${_normalize(_placeName(place))}|'
+                  '${_normalize(_placeAddress(place))}';
+
+      if (seen.add(key)) {
+        result.add(place);
+      }
+    }
+
+    result.sort((a, b) {
+      final distanceA = _distanceKm(a);
+      final distanceB = _distanceKm(b);
+
+      if (distanceA == null && distanceB == null) return 0;
+      if (distanceA == null) return 1;
+      if (distanceB == null) return -1;
+
+      return distanceA.compareTo(distanceB);
+    });
+
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Category and text helpers
+  // ---------------------------------------------------------------------------
+
+  String _normalize(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('.', ' ')
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  String _firstString(
+    Map<String, dynamic> map,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = map[key];
+
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
       }
 
-      final selected = _selectedCategory.toLowerCase();
+      if (value is num) {
+        return value.toString();
+      }
+    }
 
-      final matchesCategory = switch (selected) {
-        'parks' => category == 'park' || category == 'parks',
-        'food' =>
-          category == 'food' ||
-          category == 'restaurant' ||
-          category == 'restaurants',
-        'shopping' =>
-          category == 'shopping' ||
-          category == 'shop' ||
-          category == 'shops',
-        'landmarks' =>
-          category == 'landmark' || category == 'landmarks',
-        'areas' => category == 'area' || category == 'areas',
-        _ => true,
+    return '';
+  }
+
+  // Read category metadata only. Never infer a category from the place name
+  // or address: for example, a road named "Park Road" is not a park.
+  void _collectCategoryValues(
+    dynamic value,
+    List<String> output,
+  ) {
+    if (value == null) return;
+
+    if (value is String || value is num) {
+      final normalized = _normalize(value.toString());
+      if (normalized.isNotEmpty) output.add(normalized);
+      return;
+    }
+
+    if (value is List) {
+      for (final item in value) {
+        _collectCategoryValues(item, output);
+      }
+      return;
+    }
+
+    if (value is Map) {
+      const categoryKeys = {
+        'geoapify_categories',
+        'categories',
+        'category',
+        'subcategory',
+        'type',
+        'class',
+        'kind',
       };
 
-      return matchesSearch && matchesCategory;
+      for (final entry in value.entries) {
+        if (categoryKeys.contains(
+          entry.key.toString().toLowerCase(),
+        )) {
+          _collectCategoryValues(entry.value, output);
+        }
+      }
+    }
+  }
+
+  List<String> _categoryMetadata(
+    Map<String, dynamic> place,
+  ) {
+    final values = <String>[];
+
+    for (final key in [
+      'category',
+      'subcategory',
+      'type',
+      'categories',
+      'geoapify_categories',
+    ]) {
+      if (place.containsKey(key)) {
+        _collectCategoryValues(place[key], values);
+      }
+    }
+
+    final tags = place['tags'];
+    if (tags is Map) {
+      _collectCategoryValues(tags, values);
+    }
+
+    final properties = place['properties'];
+    if (properties is Map) {
+      for (final key in [
+        'category',
+        'subcategory',
+        'type',
+        'categories',
+        'geoapify_categories',
+      ]) {
+        if (properties.containsKey(key)) {
+          _collectCategoryValues(properties[key], values);
+        }
+      }
+
+      final nestedTags = properties['tags'];
+      if (nestedTags is Map) {
+        _collectCategoryValues(nestedTags, values);
+      }
+    }
+
+    return values.toSet().toList();
+  }
+
+  bool _hasCategory(
+    List<String> metadata,
+    List<String> accepted,
+  ) {
+    for (final value in metadata) {
+      for (final category in accepted) {
+        final expected = _normalize(category);
+
+        if (value == expected ||
+            value.startsWith('$expected ') ||
+            value.contains(' $expected ')) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  bool _isArea(Map<String, dynamic> place) {
+    final metadata = _categoryMetadata(place);
+
+    return _hasCategory(metadata, [
+      'place locality',
+      'place neighbourhood',
+      'place neighborhood',
+      'place district',
+      'place suburb',
+      'administrative',
+      'locality',
+      'neighbourhood',
+      'neighborhood',
+      'district',
+      'suburb',
+      'quarter',
+      'city',
+      'town',
+      'village',
+    ]);
+  }
+
+  bool _matchesCategory(
+    Map<String, dynamic> place,
+    String category,
+  ) {
+    if (category == 'All') return true;
+
+    final metadata = _categoryMetadata(place);
+
+    switch (category) {
+      case 'Parks':
+        return _hasCategory(metadata, [
+          'leisure park',
+          'leisure garden',
+          'leisure nature reserve',
+          'leisure playground',
+          'leisure recreation ground',
+          'park',
+          'garden',
+          'nature reserve',
+          'national park',
+          'protected area',
+          'playground',
+        ]);
+
+      case 'Food':
+        return _hasCategory(metadata, [
+          'catering restaurant',
+          'catering cafe',
+          'catering fast food',
+          'catering food court',
+          'catering bakery',
+          'catering bar',
+          'catering pub',
+          'catering',
+          'restaurant',
+          'fast food',
+          'food court',
+          'cafe',
+          'coffee shop',
+          'bakery',
+          'ice cream',
+        ]);
+
+      case 'Stays':
+        return _hasCategory(metadata, [
+          'accommodation hotel',
+          'accommodation motel',
+          'accommodation hostel',
+          'accommodation guest house',
+          'accommodation',
+          'hotel',
+          'motel',
+          'hostel',
+          'guest house',
+          'lodging',
+          'resort',
+          'camping',
+        ]);
+
+      case 'Shopping':
+        return _hasCategory(metadata, [
+          'commercial shopping mall',
+          'commercial supermarket',
+          'commercial department store',
+          'commercial market',
+          'commercial',
+          'shop',
+          'shopping',
+          'retail',
+          'supermarket',
+          'mall',
+          'market',
+          'clothing',
+          'electronics',
+        ]);
+
+      case 'Landmarks':
+        return _hasCategory(metadata, [
+          'tourism attraction',
+          'tourism museum',
+          'tourism viewpoint',
+          'tourism monument',
+          'tourism',
+          'historic',
+          'heritage',
+          'monument',
+          'museum',
+          'memorial',
+          'viewpoint',
+          'place of worship',
+        ]);
+
+      case 'Areas':
+        return _isArea(place);
+
+      default:
+        return true;
+    }
+  }
+
+  List<Map<String, dynamic>> get _filteredPlaces {
+    final query = _normalize(_searchQuery);
+
+    return _nearbyPlaces.where((place) {
+      // The API already filtered named categories. Do not reject its results
+      // a second time if the provider omits category metadata.
+      //
+      // Areas is the exception: it is filtered locally from the All response.
+      if (_loadedForCategory == 'Areas' &&
+          !_matchesCategory(place, 'Areas')) {
+        return false;
+      }
+
+      if (query.isEmpty) return true;
+
+      final searchable = _normalize(
+        '${_placeName(place)} '
+        '${_placeAddress(place)} '
+        '${_displayCategory(place)}',
+      );
+
+      return searchable.contains(query);
     }).toList();
   }
+
+  String _placeName(Map<String, dynamic> place) {
+    return _firstString(place, [
+      'name',
+      'display_name',
+      'title',
+      'address_line1',
+      'formatted',
+    ]);
+  }
+
+  String _placeAddress(Map<String, dynamic> place) {
+    final direct = _firstString(place, [
+      'formatted',
+      'address',
+      'full_address',
+      'display_name',
+      'vicinity',
+    ]);
+
+    if (direct.isNotEmpty) return direct;
+
+    return [
+      _firstString(place, ['address_line1', 'street']),
+      _firstString(place, ['address_line2', 'suburb', 'district']),
+      _firstString(place, ['city', 'town', 'village']),
+    ].where((part) => part.isNotEmpty).join(', ');
+  }
+
+  String _displayCategory(Map<String, dynamic> place) {
+    final metadata = _categoryMetadata(place);
+
+    if (_hasCategory(metadata, ['catering'])) {
+      return 'Food & Drink';
+    }
+
+    if (_hasCategory(metadata, ['accommodation'])) {
+      return 'Stay';
+    }
+
+    if (_hasCategory(metadata, [
+      'leisure park',
+      'park',
+      'garden',
+    ])) {
+      return 'Park';
+    }
+
+    if (_hasCategory(metadata, ['commercial', 'shop'])) {
+      return 'Shopping';
+    }
+
+    if (_hasCategory(metadata, ['tourism', 'historic'])) {
+      return 'Landmark';
+    }
+
+    if (_isArea(place)) return 'Area';
+
+    final direct = _firstString(place, [
+      'subcategory',
+      'category',
+      'type',
+    ]);
+
+    if (direct.isEmpty) return 'Nearby place';
+
+    return direct
+        .split(RegExp(r'[._\s]+'))
+        .where((word) => word.isNotEmpty)
+        .map(
+          (word) =>
+              word[0].toUpperCase() + word.substring(1).toLowerCase(),
+        )
+        .join(' ');
+  }
+
+  IconData _categoryIcon(Map<String, dynamic> place) {
+    final metadata = _categoryMetadata(place);
+
+    if (_hasCategory(metadata, [
+      'accommodation',
+      'hotel',
+      'hostel',
+    ])) {
+      return Icons.hotel_rounded;
+    }
+
+    if (_hasCategory(metadata, [
+      'catering',
+      'restaurant',
+      'cafe',
+    ])) {
+      return Icons.restaurant_rounded;
+    }
+
+    if (_hasCategory(metadata, [
+      'leisure',
+      'park',
+      'garden',
+    ])) {
+      return Icons.park_rounded;
+    }
+
+    if (_hasCategory(metadata, [
+      'commercial',
+      'shop',
+      'shopping',
+    ])) {
+      return Icons.shopping_bag_rounded;
+    }
+
+    if (_hasCategory(metadata, [
+      'tourism',
+      'historic',
+      'museum',
+    ])) {
+      return Icons.account_balance_rounded;
+    }
+
+    if (_isArea(place)) {
+      return Icons.location_city_rounded;
+    }
+
+    return Icons.place_rounded;
+  }
+
+  String _placeImage(Map<String, dynamic> place) {
+    return _firstString(place, [
+      'image_url',
+      'image',
+      'photo_url',
+      'thumbnail',
+      'photo',
+    ]);
+  }
+
+  (double, double)? _coordinates(
+    Map<String, dynamic> place,
+  ) {
+    final lat = place['latitude'] ?? place['lat'];
+    final lon = place['longitude'] ?? place['lon'] ?? place['lng'];
+
+    if (lat is num && lon is num) {
+      if (lat >= -90 &&
+          lat <= 90 &&
+          lon >= -180 &&
+          lon <= 180) {
+        return (lat.toDouble(), lon.toDouble());
+      }
+    }
+
+    final geometry = place['_geometry'] ?? place['geometry'];
+
+    if (geometry is Map) {
+      final coordinates = geometry['coordinates'];
+
+      // GeoJSON Point coordinates are [longitude, latitude].
+      if (coordinates is List && coordinates.length >= 2) {
+        final longitude = coordinates[0];
+        final latitude = coordinates[1];
+
+        if (longitude is num && latitude is num) {
+          return (
+            latitude.toDouble(),
+            longitude.toDouble(),
+          );
+        }
+      }
+    }
+
+    return null;
+  }
+
+  double? _distanceKm(Map<String, dynamic> place) {
+    final value =
+        place['distance_km'] ??
+        place['distanceKm'] ??
+        place['distance'];
+
+    if (value is num) {
+      // Some providers return distance in metres.
+      return value > 100 ? value / 1000 : value.toDouble();
+    }
+
+    if (value is String) {
+      final parsed = double.tryParse(value);
+
+      if (parsed != null) {
+        return parsed > 100 ? parsed / 1000 : parsed;
+      }
+    }
+
+    final coordinates = _coordinates(place);
+    final current = _currentPosition;
+
+    if (coordinates == null || current == null) return null;
+
+    return Geolocator.distanceBetween(
+          current.latitude,
+          current.longitude,
+          coordinates.$1,
+          coordinates.$2,
+        ) /
+        1000;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Interactions
+  // ---------------------------------------------------------------------------
+
+  Future<void> _selectCategory(String category) async {
+    if (category == _selectedCategory && !_isLoading) return;
+
+    setState(() {
+      _selectedCategory = category;
+      _searchQuery = '';
+      _searchController.clear();
+    });
+
+    if (_cardsController.hasClients) {
+      _cardsController.jumpTo(0);
+    }
+
+    await _loadNearbyPlaces(category: category);
+  }
+
+  Future<void> _openPlace(
+    Map<String, dynamic> place,
+  ) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PlaceDetailsScreen(place: place),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main screen
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: WorldCompanionColors.softWhite,
-      appBar: AppBar(
-        backgroundColor: WorldCompanionColors.softWhite,
-        surfaceTintColor: Colors.transparent,
-        elevation: WorldCompanionElevation.none,
-        leading: IconButton(
-          tooltip: 'Go home',
-          onPressed: () => AppShellNavigation.of(context).goHome(),
-          icon: const Icon(
-            Icons.arrow_back_rounded,
-            color: WorldCompanionColors.deepOcean,
-          ),
-        ),
-        title: Text(
-          widget.routeMode ? 'Plan a Route' : 'Explore',
-          style: _textTheme.titleLarge?.copyWith(
-            color: WorldCompanionColors.deepOcean,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-      body: _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(
-          color: WorldCompanionColors.oceanBlue,
-        ),
-      );
-    }
-
-    if (_error != null) {
-      return _buildErrorState();
-    }
-
-    final places = _filteredPois;
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 900;
-        final horizontalPadding = isWide
-            ? WorldCompanionSpacing.desktopPage
-            : WorldCompanionSpacing.mobilePage;
-
-        return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(
-            horizontalPadding,
-            WorldCompanionSpacing.md,
-            horizontalPadding,
-            WorldCompanionSpacing.xxxl,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1200),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildIntro(),
-                  const SizedBox(height: WorldCompanionSpacing.lg),
-                  _buildSearchField(),
-                  const SizedBox(height: WorldCompanionSpacing.lg),
-                  _buildMap(isWide: isWide),
-                  if (widget.routeMode) ...[
-                    const SizedBox(height: WorldCompanionSpacing.lg),
-                    _buildRouteModeCard(),
-                  ],
-                  const SizedBox(height: WorldCompanionSpacing.xxl),
-                  _buildSectionHeading(
-                    'Explore by category',
-                    'Find places by interest',
-                  ),
-                  const SizedBox(height: WorldCompanionSpacing.md),
-                  _buildCategories(),
-                  const SizedBox(height: WorldCompanionSpacing.xxl),
-                  _buildPlacesHeader(places.length),
-                  const SizedBox(height: WorldCompanionSpacing.md),
-                  if (places.isEmpty)
-                    _buildEmptyState()
-                  else
-                    _buildPlacesGrid(places, isWide: isWide),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildIntro() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: WorldCompanionSpacing.sm,
-            vertical: WorldCompanionSpacing.xs,
-          ),
-          decoration: BoxDecoration(
-            color: WorldCompanionColors.infoSurface,
-            borderRadius: BorderRadius.circular(WorldCompanionRadius.pill),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.explore_outlined,
-                size: 15,
-                color: WorldCompanionColors.oceanBlue,
-              ),
-              const SizedBox(width: WorldCompanionSpacing.xs),
-              Text(
-                widget.routeMode ? 'YOUR NEXT JOURNEY' : 'YOUR WORLD, DISCOVERED',
-                style: _textTheme.labelSmall?.copyWith(
-                  color: WorldCompanionColors.oceanBlue,
-                  letterSpacing: 0.7,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: WorldCompanionSpacing.md),
-        Text(
-          widget.routeMode ? 'Plan your journey' : 'Discover the world',
-          style: _textTheme.displayMedium?.copyWith(
-            color: WorldCompanionColors.deepOcean,
-            height: 1.12,
-          ),
-        ),
-        const SizedBox(height: WorldCompanionSpacing.xs),
-        Text(
-          widget.routeMode
-              ? 'Choose destinations and prepare your route.'
-              : 'Find places worth experiencing, right on your map.',
-          style: _textTheme.bodyMedium?.copyWith(
-            color: WorldCompanionColors.secondaryText,
-            height: 1.5,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSearchField() {
-    return TextField(
-      onChanged: (value) {
-        setState(() => _searchQuery = value);
-      },
-      style: _textTheme.bodyMedium?.copyWith(
-        color: WorldCompanionColors.primaryText,
-      ),
-      decoration: InputDecoration(
-        hintText: 'Search places and categories',
-        hintStyle: _textTheme.bodyMedium?.copyWith(
-          color: WorldCompanionColors.mutedText,
-        ),
-        prefixIcon: const Icon(
-          Icons.search_rounded,
-          color: WorldCompanionColors.oceanBlue,
-        ),
-        suffixIcon: _searchQuery.isNotEmpty
-            ? IconButton(
-                tooltip: 'Clear search',
-                onPressed: () => setState(() => _searchQuery = ''),
-                icon: const Icon(Icons.close_rounded),
-              )
-            : null,
-        filled: true,
-        fillColor: WorldCompanionColors.surface,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: WorldCompanionSpacing.md,
-          vertical: WorldCompanionSpacing.md,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
-          borderSide: const BorderSide(color: WorldCompanionColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
-          borderSide: const BorderSide(color: WorldCompanionColors.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
-          borderSide: const BorderSide(
-            color: WorldCompanionColors.oceanBlue,
-            width: 1.5,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMap({required bool isWide}) {
-    return Container(
-      width: double.infinity,
-      height: isWide ? 460 : 340,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: WorldCompanionColors.mapSurface,
-        borderRadius: BorderRadius.circular(WorldCompanionRadius.extraLarge),
-        border: Border.all(color: WorldCompanionColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: WorldCompanionColors.deepOcean.withOpacity(0.06),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: const WorldMap(),
-    );
-  }
-
-  Widget _buildRouteModeCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
-      decoration: BoxDecoration(
-        color: WorldCompanionColors.infoSurface,
-        borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
-        border: Border.all(color: WorldCompanionColors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      backgroundColor: _surface,
+      body: Stack(
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: WorldCompanionColors.surface,
-              borderRadius: BorderRadius.circular(WorldCompanionRadius.medium),
-            ),
-            child: const Icon(
-              Icons.alt_route_rounded,
-              color: WorldCompanionColors.oceanBlue,
+          // Keep the map full-screen and disable its predefined POI markers.
+          const Positioned.fill(
+            child: WorldMap(
+              showBottomPlaceOverlay: false,
+              showPoiMarkers: false,
             ),
           ),
-          const SizedBox(width: WorldCompanionSpacing.md),
-          Expanded(
+
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 265,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withOpacity(0.30),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          SafeArea(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Build your route',
-                  style: _textTheme.titleMedium?.copyWith(
-                    color: WorldCompanionColors.deepOcean,
-                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: _buildTopControls(),
                 ),
-                const SizedBox(height: WorldCompanionSpacing.xxs),
-                Text(
-                  'Browse the destinations below to explore places for your journey.',
-                  style: _textTheme.bodySmall?.copyWith(
-                    color: WorldCompanionColors.secondaryText,
-                    height: 1.5,
-                  ),
-                ),
+                const Spacer(),
+                _buildBottomPlaces(_filteredPlaces),
               ],
             ),
           ),
@@ -381,234 +891,494 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
-  Widget _buildSectionHeading(String title, String subtitle) {
+  // ---------------------------------------------------------------------------
+  // Top controls
+  // ---------------------------------------------------------------------------
+
+  Widget _buildTopControls() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: _textTheme.headlineSmall?.copyWith(
-            color: WorldCompanionColors.deepOcean,
+        Row(
+          children: [
+            Container(
+              height: 44,
+              width: 44,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(15),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.13),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.explore_rounded,
+                color: _primary,
+                size: 25,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Explore',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 25,
+                      fontWeight: FontWeight.w800,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black45,
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    'Discover real places around you',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black45,
+                          blurRadius: 6,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _floatingButton(
+              Icons.my_location_rounded,
+              'Refresh nearby places',
+              () => _loadNearbyPlaces(
+                category: _selectedCategory,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.13),
+                blurRadius: 18,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: TextField(
+            controller: _searchController,
+            onChanged: (value) {
+              setState(() => _searchQuery = value);
+            },
+            decoration: InputDecoration(
+              hintText: 'Search nearby places...',
+              hintStyle: TextStyle(
+                color: Colors.blueGrey.shade400,
+                fontSize: 14,
+              ),
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: _primary,
+              ),
+              suffixIcon: _searchQuery.isEmpty
+                  ? null
+                  : IconButton(
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 16,
+              ),
+            ),
           ),
         ),
-        const SizedBox(height: WorldCompanionSpacing.xxs),
-        Text(
-          subtitle,
-          style: _textTheme.bodySmall?.copyWith(
-            color: WorldCompanionColors.mutedText,
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 42,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _categories.length,
+            separatorBuilder: (_, __) =>
+                const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final category = _categories[index];
+              final selected = category == _selectedCategory;
+
+              return Material(
+                color: selected ? _primary : Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                elevation: 3,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(24),
+                  onTap: () => _selectCategory(category),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 15,
+                    ),
+                    child: Center(
+                      child: Text(
+                        category,
+                        style: TextStyle(
+                          color: selected
+                              ? Colors.white
+                              : _primary,
+                          fontSize: 13,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],
     );
   }
 
-  Widget _buildCategories() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
+  Widget _floatingButton(
+    IconData icon,
+    String tooltip,
+    VoidCallback onTap,
+  ) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(15),
+      elevation: 5,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(15),
+        onTap: onTap,
+        child: SizedBox(
+          height: 44,
+          width: 44,
+          child: Tooltip(
+            message: tooltip,
+            child: Icon(
+              icon,
+              color: _primary,
+              size: 22,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bottom place cards
+  // ---------------------------------------------------------------------------
+
+  Widget _buildBottomPlaces(
+    List<Map<String, dynamic>> places,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var i = 0; i < _categories.length; i++) ...[
-            if (i > 0) const SizedBox(width: WorldCompanionSpacing.xs),
-            _categoryChip(_categories[i]),
-          ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedCategory == 'All'
+                            ? 'Nearby places'
+                            : _selectedCategory,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _isLoading
+                            ? 'Finding real places near you...'
+                            : '${places.length} '
+                                '${places.length == 1 ? 'place' : 'places'} found',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_isLoading)
+                  const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Colors.white,
+                    ),
+                  )
+                else
+                  _floatingButton(
+                    Icons.refresh_rounded,
+                    'Reload places',
+                    () => _loadNearbyPlaces(
+                      category: _selectedCategory,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (_isLoading)
+            _buildStatusCard(
+              message: 'Discovering real nearby places...',
+              loading: true,
+            )
+          else if (_errorMessage != null || places.isEmpty)
+            _buildStatusCard(
+              message: _errorMessage ??
+                  'No places match your search. Try another filter.',
+              loading: false,
+            )
+          else
+            SizedBox(
+              height: 174,
+              child: ListView.separated(
+                controller: _cardsController,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+                scrollDirection: Axis.horizontal,
+                itemCount: places.length,
+                separatorBuilder: (_, __) =>
+                    const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  return _buildPlaceCard(places[index]);
+                },
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _categoryChip(String label) {
-    final selected = _selectedCategory == label;
-
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: AnimatedContainer(
-        duration: WorldCompanionMotion.fast,
-        curve: WorldCompanionMotion.standardCurve,
-        decoration: BoxDecoration(
-          color: selected
-              ? WorldCompanionColors.deepOcean
-              : WorldCompanionColors.surface,
-          borderRadius: BorderRadius.circular(WorldCompanionRadius.pill),
-          border: Border.all(
-            color: selected
-                ? WorldCompanionColors.deepOcean
-                : WorldCompanionColors.border,
+  Widget _buildStatusCard({
+    required String message,
+    required bool loading,
+  }) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 112),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(WorldCompanionRadius.pill),
-            onTap: () => setState(() => _selectedCategory = label),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: WorldCompanionSpacing.md,
-                vertical: WorldCompanionSpacing.sm,
+        ],
+      ),
+      child: Row(
+        children: [
+          if (loading)
+            const SizedBox(
+              height: 26,
+              width: 26,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: _secondary,
               ),
-              child: Text(
-                label,
-                style: _textTheme.labelMedium?.copyWith(
-                  color: selected
-                      ? WorldCompanionColors.surface
-                      : WorldCompanionColors.secondaryText,
-                ),
+            )
+          else
+            const Icon(
+              Icons.location_searching_rounded,
+              color: _primary,
+              size: 28,
+            ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _primary,
+                fontSize: 13,
+                height: 1.4,
               ),
             ),
           ),
-        ),
+          if (!loading)
+            TextButton(
+              onPressed: () => _loadNearbyPlaces(
+                category: _selectedCategory,
+              ),
+              child: const Text('Retry'),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _buildPlacesHeader(int count) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Expanded(
-          child: Text(
-            widget.routeMode ? 'Choose places' : 'Explore places',
-            style: _textTheme.headlineSmall?.copyWith(
-              color: WorldCompanionColors.deepOcean,
-            ),
-          ),
-        ),
-        const SizedBox(width: WorldCompanionSpacing.sm),
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: WorldCompanionSpacing.sm,
-            vertical: WorldCompanionSpacing.xs,
-          ),
-          decoration: BoxDecoration(
-            color: WorldCompanionColors.surface,
-            borderRadius: BorderRadius.circular(WorldCompanionRadius.pill),
-            border: Border.all(color: WorldCompanionColors.border),
-          ),
-          child: Text(
-            '$count places',
-            style: _textTheme.labelSmall?.copyWith(
-              color: WorldCompanionColors.secondaryText,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+  Widget _buildPlaceCard(
+    Map<String, dynamic> place,
+  ) {
+    final imageUrl = _placeImage(place);
+    final distance = _distanceKm(place);
+    final icon = _categoryIcon(place);
+    final address = _placeAddress(place);
 
-  Widget _buildPlacesGrid(
-    List<MapEntry<String, dynamic>> places, {
-    required bool isWide,
-  }) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: isWide ? 340 : 420,
-        mainAxisExtent: 204,
-        crossAxisSpacing: WorldCompanionSpacing.md,
-        mainAxisSpacing: WorldCompanionSpacing.md,
-      ),
-      itemCount: places.length,
-      itemBuilder: (context, index) {
-        final entry = places[index];
-        final place = Map<String, dynamic>.from(entry.value);
-
-        return _placeCard(
-          name: place['name']?.toString() ?? entry.key,
-          category: place['category']?.toString() ?? 'destination',
-          place: {...place, 'id': entry.key},
-        );
-      },
-    );
-  }
-
-  Widget _placeCard({
-    required String name,
-    required String category,
-    required Map<String, dynamic> place,
-  }) {
-    final icon = _categoryIcon(category);
-
-    return Material(
-      color: WorldCompanionColors.surface,
-      borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PlaceDetailsScreen(place: place),
-            ),
-          );
-        },
-        child: Ink(
-          padding: const EdgeInsets.all(WorldCompanionSpacing.lg),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
-            border: Border.all(color: WorldCompanionColors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return SizedBox(
+      width: 282,
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
+        elevation: 7,
+        child: InkWell(
+          onTap: () => _openPlace(place),
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: WorldCompanionColors.infoSurface,
-                      borderRadius:
-                          BorderRadius.circular(WorldCompanionRadius.medium),
-                    ),
-                    child: Icon(
-                      icon,
-                      color: WorldCompanionColors.oceanBlue,
-                      size: 22,
-                    ),
-                  ),
-                  const Spacer(),
-                  const Icon(
-                    Icons.arrow_outward_rounded,
-                    size: 18,
-                    color: WorldCompanionColors.mutedText,
-                  ),
-                ],
+              SizedBox(
+                width: 104,
+                height: double.infinity,
+                child: imageUrl.isNotEmpty
+                    ? Image.network(
+                        imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            _imagePlaceholder(icon),
+                      )
+                    : _imagePlaceholder(icon),
               ),
-              const Spacer(),
-              Text(
-                name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: _textTheme.titleMedium?.copyWith(
-                  color: WorldCompanionColors.deepOcean,
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    12,
+                    12,
+                    10,
+                    10,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _chipBackground,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _displayCategory(place),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _primary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        _placeName(place),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _primary,
+                          fontSize: 14,
+                          height: 1.2,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Expanded(
+                        child: Text(
+                          address.isEmpty
+                              ? 'Address unavailable'
+                              : address,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.blueGrey.shade600,
+                            fontSize: 11,
+                            height: 1.25,
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.near_me_rounded,
+                            color: _secondary,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              distance == null
+                                  ? 'Nearby'
+                                  : '${distance.toStringAsFixed(1)} km away',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _secondary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_rounded,
+                            color: _primary,
+                            size: 17,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: WorldCompanionSpacing.xxs),
-              Text(
-                _formatCategory(category),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: _textTheme.bodySmall?.copyWith(
-                  color: WorldCompanionColors.mutedText,
-                ),
-              ),
-              const SizedBox(height: WorldCompanionSpacing.sm),
-              Row(
-                children: [
-                  const Icon(
-                    Icons.arrow_forward_rounded,
-                    size: 15,
-                    color: WorldCompanionColors.oceanBlue,
-                  ),
-                  const SizedBox(width: WorldCompanionSpacing.xs),
-                  Text(
-                    'View details',
-                    style: _textTheme.labelMedium?.copyWith(
-                      color: WorldCompanionColors.oceanBlue,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
@@ -617,144 +1387,16 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _imagePlaceholder(IconData icon) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-        horizontal: WorldCompanionSpacing.lg,
-        vertical: WorldCompanionSpacing.xxxl,
-      ),
-      decoration: BoxDecoration(
-        color: WorldCompanionColors.surface,
-        borderRadius: BorderRadius.circular(WorldCompanionRadius.large),
-        border: Border.all(color: WorldCompanionColors.border),
-      ),
-      child: Column(
-        children: [
-          const Icon(
-            Icons.travel_explore_rounded,
-            size: 42,
-            color: WorldCompanionColors.softBlue,
-          ),
-          const SizedBox(height: WorldCompanionSpacing.md),
-          Text(
-            'No places found',
-            style: _textTheme.titleMedium?.copyWith(
-              color: WorldCompanionColors.deepOcean,
-            ),
-          ),
-          const SizedBox(height: WorldCompanionSpacing.xs),
-          Text(
-            'Try another search or select a different category.',
-            textAlign: TextAlign.center,
-            style: _textTheme.bodySmall?.copyWith(
-              color: WorldCompanionColors.secondaryText,
-            ),
-          ),
-          if (_searchQuery.isNotEmpty || _selectedCategory != 'All') ...[
-            const SizedBox(height: WorldCompanionSpacing.md),
-            OutlinedButton.icon(
-              onPressed: () {
-                setState(() {
-                  _searchQuery = '';
-                  _selectedCategory = 'All';
-                });
-              },
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Clear filters'),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorState() {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(WorldCompanionSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: WorldCompanionColors.errorSurface,
-                borderRadius:
-                    BorderRadius.circular(WorldCompanionRadius.extraLarge),
-              ),
-              child: const Icon(
-                Icons.cloud_off_rounded,
-                size: 34,
-                color: WorldCompanionColors.error,
-              ),
-            ),
-            const SizedBox(height: WorldCompanionSpacing.lg),
-            Text(
-              'Couldn’t load places',
-              style: _textTheme.headlineSmall?.copyWith(
-                color: WorldCompanionColors.deepOcean,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: WorldCompanionSpacing.xs),
-            Text(
-              'Check your connection and try again.',
-              style: _textTheme.bodyMedium?.copyWith(
-                color: WorldCompanionColors.secondaryText,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: WorldCompanionSpacing.lg),
-            FilledButton.icon(
-              onPressed: () {
-                setState(() {
-                  _loading = true;
-                  _error = null;
-                });
-                _loadPois();
-              },
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Try again'),
-            ),
-          ],
+      color: _chipBackground,
+      child: Center(
+        child: Icon(
+          icon,
+          size: 32,
+          color: _primary.withOpacity(0.72),
         ),
       ),
     );
-  }
-
-  IconData _categoryIcon(String category) {
-    switch (category.toLowerCase()) {
-      case 'park':
-      case 'parks':
-        return Icons.park_rounded;
-      case 'food':
-      case 'restaurant':
-      case 'restaurants':
-        return Icons.restaurant_rounded;
-      case 'shopping':
-      case 'shop':
-      case 'shops':
-        return Icons.shopping_bag_rounded;
-      case 'landmark':
-      case 'landmarks':
-        return Icons.account_balance_rounded;
-      case 'area':
-      case 'areas':
-        return Icons.location_city_rounded;
-      default:
-        return Icons.place_rounded;
-    }
-  }
-
-  String _formatCategory(String category) {
-    if (category.isEmpty) return 'Destination';
-
-    return category
-        .split(RegExp(r'[_\s]+'))
-        .where((part) => part.isNotEmpty)
-        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
-        .join(' ');
   }
 }

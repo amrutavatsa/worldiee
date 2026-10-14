@@ -27,9 +27,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
 import json
+import math
 import uuid
 
 from django.views.decorators.csrf import csrf_exempt
+from django.db import transaction
 from django.http import JsonResponse
 from django.utils import timezone
 
@@ -864,24 +866,48 @@ def reviews_create_view(request):
 def hotels_search_view(request):
     area = request.GET.get("area")
     max_price = request.GET.get("max_price")
+    lat_value = request.GET.get("lat")
+    lon_value = request.GET.get("lon")
+    radius_value = request.GET.get("radius_km", "10")
+
+    user_lat = user_lon = radius_km = None
+
+    if lat_value is not None or lon_value is not None:
+        try:
+            user_lat = float(lat_value)
+            user_lon = float(lon_value)
+            radius_km = float(radius_value)
+            if not (-90 <= user_lat <= 90 and -180 <= user_lon <= 180):
+                raise ValueError
+            if not (0 < radius_km <= 500):
+                raise ValueError
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"success": False, "error": "Provide valid lat, lon and radius_km values."},
+                status=400,
+            )
 
     qs = Hotel.objects.all()
 
     if area:
-        qs = qs.filter(
-            area__icontains=area
-        )
+        qs = qs.filter(area__icontains=area)
 
     if max_price:
-        qs = qs.filter(
-            price_per_night__lte=max_price
-        )
+        try:
+            qs = qs.filter(price_per_night__lte=float(max_price))
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"success": False, "error": "max_price must be a valid number."},
+                status=400,
+            )
 
     data = list(
         qs.values(
             "id",
             "name",
             "area",
+            "latitude",
+            "longitude",
             "price_per_night",
             "rating",
             "facilities",
@@ -889,13 +915,60 @@ def hotels_search_view(request):
         )
     )
 
-    return JsonResponse(
-        {
-            "success": True,
-            "data": data,
-        }
-    )
+    if user_lat is not None and user_lon is not None:
+        nearby = []
+        for hotel in data:
+            lat1 = math.radians(user_lat)
+            lat2 = math.radians(hotel["latitude"])
+            delta_lat = math.radians(hotel["latitude"] - user_lat)
+            delta_lon = math.radians(hotel["longitude"] - user_lon)
+            a = (
+                math.sin(delta_lat / 2) ** 2
+                + math.cos(lat1) * math.cos(lat2)
+                * math.sin(delta_lon / 2) ** 2
+            )
+            distance_km = 6371 * 2 * math.atan2(
+                math.sqrt(a), math.sqrt(max(0.0, 1 - a))
+            )
+            if distance_km <= radius_km:
+                hotel["distance_km"] = round(distance_km, 2)
+                nearby.append(hotel)
 
+        data = sorted(nearby, key=lambda hotel: hotel["distance_km"])
+
+    # Fall back to real-world accommodation only when no local hotels match.
+    if not data and user_lat is not None and user_lon is not None:
+        try:
+            real_stays = search_nearby(
+                latitude=user_lat,
+                longitude=user_lon,
+                radius_km=min(radius_km, 15.0),
+                category="stays",
+            )
+        except Exception:
+            real_stays = []
+
+        for place in real_stays:
+            tags = place.get("tags") or {}
+            provider_id = place.get("provider_id") or ""
+            data.append({
+                "id": provider_id,
+                "provider_id": provider_id,
+                "is_external": True,
+                "name": place.get("name") or "Unnamed stay",
+                "area": place.get("address") or "Location unavailable",
+                "latitude": place.get("latitude"),
+                "longitude": place.get("longitude"),
+                "price_per_night": None,
+                "rating": tags.get("rating"),
+                "facilities": [],
+                "room_types": [],
+                "distance_km": place.get("distance_km"),
+                "website": tags.get("website"),
+                "phone": tags.get("phone"),
+            })
+
+    return JsonResponse({"success": True, "data": data})
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -1210,74 +1283,137 @@ def sos_resolve_view(
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def itinerary_create_view(request):
-    """
-    Body:
-
-    {
-        "title": "My Trip",
-        "stops": [
-            {
-                "day_number": 1,
-                "place_id": "...",
-                "scheduled_time": "10:00",
-                "notes": "Visit in the morning"
-            }
-        ]
-    }
-    """
-
+    """Create an itinerary with curated or external real-world places."""
     body = request.data
+    stops_data = body.get("stops", [])
 
-    itinerary = Itinerary.objects.create(
-        id=uuid.uuid4(),
-        user=request.user,
-        title=body.get(
-            "title",
-            "My Trip",
-        ),
-    )
-
-    for i, stop in enumerate(
-        body.get("stops", [])
-    ):
-        try:
-            place = Place.objects.get(
-                id=stop["place_id"]
-            )
-
-        except (
-            Place.DoesNotExist,
-            KeyError,
-        ):
-            continue
-
-        ItineraryStop.objects.create(
-            itinerary=itinerary,
-            day_number=stop.get(
-                "day_number",
-                1,
-            ),
-            order=i,
-            place=place,
-            scheduled_time=stop.get(
-                "scheduled_time",
-                "",
-            ),
-            notes=stop.get(
-                "notes",
-                "",
-            ),
+    if not isinstance(stops_data, list) or not stops_data:
+        return JsonResponse(
+            {"success": False, "error": "Provide at least one itinerary stop."},
+            status=400,
         )
 
+    prepared_stops = []
+
+    # Validate every stop before creating the itinerary, avoiding empty trips.
+    for index, stop in enumerate(stops_data):
+        if not isinstance(stop, dict):
+            return JsonResponse(
+                {"success": False, "error": f"Stop {index + 1} must be an object."},
+                status=400,
+            )
+
+        try:
+            day_number = int(stop.get("day_number", 1))
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"success": False, "error": f"Stop {index + 1} has an invalid day number."},
+                status=400,
+            )
+
+        if not 1 <= day_number <= 365:
+            return JsonResponse(
+                {"success": False, "error": f"Stop {index + 1} day number must be between 1 and 365."},
+                status=400,
+            )
+
+        place_id = stop.get("place_id")
+        place = Place.objects.filter(id=str(place_id)).first() if place_id else None
+
+        if place is not None:
+            prepared_stops.append({
+                "place": place,
+                "data": stop,
+                "day_number": day_number,
+            })
+            continue
+
+        external_id = str(
+            stop.get("external_place_id") or stop.get("provider_id") or place_id or ""
+        ).strip()
+        name = str(stop.get("external_place_name") or stop.get("name") or "").strip()
+        category = str(stop.get("external_place_category") or stop.get("category") or "").strip()
+        address = str(stop.get("external_place_address") or stop.get("address") or "").strip()
+
+        try:
+            latitude = float(
+                stop.get("external_place_latitude", stop.get("latitude"))
+            )
+            longitude = float(
+                stop.get("external_place_longitude", stop.get("longitude"))
+            )
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"success": False, "error": f"Stop {index + 1} needs valid coordinates."},
+                status=400,
+            )
+
+        if not name or not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+            return JsonResponse(
+                {"success": False, "error": f"Stop {index + 1} has invalid name or coordinates."},
+                status=400,
+            )
+
+        if len(name) > 200 or len(external_id) > 255 or len(category) > 64 or len(address) > 500:
+            return JsonResponse(
+                {"success": False, "error": f"Stop {index + 1} contains a field that is too long."},
+                status=400,
+            )
+
+        prepared_stops.append({
+            "place": None,
+            "external_place_id": external_id,
+            "external_place_name": name,
+            "external_place_category": category,
+            "external_place_latitude": latitude,
+            "external_place_longitude": longitude,
+            "external_place_address": address,
+            "data": stop,
+            "day_number": day_number,
+        })
+
+    title = str(body.get("title") or "My Trip").strip() or "My Trip"
+    if len(title) > 200:
+        return JsonResponse(
+            {"success": False, "error": "Trip title must be 200 characters or fewer."},
+            status=400,
+        )
+
+    with transaction.atomic():
+        itinerary = Itinerary.objects.create(
+            id=uuid.uuid4(),
+            user=request.user,
+            title=title,
+        )
+
+        for index, item in enumerate(prepared_stops):
+            stop_data = item["data"]
+            day_number = item["day_number"]
+
+            fields = {
+                "itinerary": itinerary,
+                "day_number": day_number,
+                "order": index,
+                "place": item.get("place"),
+                "scheduled_time": str(stop_data.get("scheduled_time") or "")[:20],
+                "notes": str(stop_data.get("notes") or "")[:300],
+            }
+
+            for field in (
+                "external_place_id",
+                "external_place_name",
+                "external_place_category",
+                "external_place_latitude",
+                "external_place_longitude",
+                "external_place_address",
+            ):
+                if field in item:
+                    fields[field] = item[field]
+
+            ItineraryStop.objects.create(**fields)
+
     return JsonResponse(
-        {
-            "success": True,
-            "data": {
-                "id": str(
-                    itinerary.id
-                ),
-            },
-        },
+        {"success": True, "data": {"id": str(itinerary.id)}},
         status=201,
     )
 
@@ -1285,85 +1421,57 @@ def itinerary_create_view(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def itinerary_list_view(request):
-    itineraries = (
-        request.user.itineraries
-        .order_by("-created_at")
-    )
-
-    return JsonResponse(
-        {
-            "success": True,
-            "data": [
-                {
-                    "id": str(
-                        itinerary.id
-                    ),
-                    "title": itinerary.title,
-                    "created_at": (
-                        itinerary.created_at
-                        .isoformat()
-                    ),
-                }
-                for itinerary in itineraries
-            ],
-        }
-    )
+    itineraries = request.user.itineraries.order_by("-created_at")
+    return JsonResponse({
+        "success": True,
+        "data": [
+            {
+                "id": str(itinerary.id),
+                "title": itinerary.title,
+                "created_at": itinerary.created_at.isoformat(),
+            }
+            for itinerary in itineraries
+        ],
+    })
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
-def itinerary_detail_view(
-    request,
-    itinerary_id,
-):
+def itinerary_detail_view(request, itinerary_id):
     try:
-        itinerary = Itinerary.objects.get(
-            id=itinerary_id,
-            user=request.user,
-        )
-
+        itinerary = Itinerary.objects.get(id=itinerary_id, user=request.user)
     except Itinerary.DoesNotExist:
-        return JsonResponse(
-            {
-                "error": "itinerary not found"
-            },
-            status=404,
-        )
+        return JsonResponse({"error": "itinerary not found"}, status=404)
 
-    stops = (
-        itinerary.stops
-        .select_related("place")
-        .all()
-    )
-
+    stops = itinerary.stops.select_related("place").all()
     days = {}
 
     for stop in stops:
-        days.setdefault(
-            stop.day_number,
-            [],
-        ).append(
-            {
-                "place": stop.place.name,
-                "scheduled_time": (
-                    stop.scheduled_time
-                ),
-                "notes": stop.notes,
-            }
-        )
+        place = stop.place
+        days.setdefault(stop.day_number, []).append({
+            "place": place.name if place else stop.external_place_name,
+            "place_id": place.id if place else None,
+            "external_place_id": stop.external_place_id or None,
+            "category": place.category if place else stop.external_place_category,
+            "latitude": (
+                place.latitude if place else stop.external_place_latitude
+            ),
+            "longitude": (
+                place.longitude if place else stop.external_place_longitude
+            ),
+            "address": "" if place else stop.external_place_address,
+            "scheduled_time": stop.scheduled_time,
+            "notes": stop.notes,
+        })
 
-    return JsonResponse(
-        {
-            "success": True,
-            "data": {
-                "id": str(
-                    itinerary.id
-                ),
-                "title": itinerary.title,
-                "days": days,
-            },
-        }
-    )
+    return JsonResponse({
+        "success": True,
+        "data": {
+            "id": str(itinerary.id),
+            "title": itinerary.title,
+            "days": days,
+        },
+    })
 
 
 # ---------------------------------------------------------------------------

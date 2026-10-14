@@ -4,8 +4,12 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
-  static const String baseUrl = "http://127.0.0.1:8000";
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8000',
+  );
   static const String _tokenKey = "auth_token";
+  static const String _googlePhotoKey = "google_photo_url";
 
   static Future<Map<String, dynamic>> register(
     String username,
@@ -66,11 +70,21 @@ class AuthService {
   static Future<void> saveToken(String token) async {
     await _saveToken(token);
   }
+  static Future<void> saveGooglePhotoUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_googlePhotoKey, url);
+  }
+
+  static Future<String?> getGooglePhotoUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_googlePhotoKey);
+  }
 
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
 
     await prefs.remove(_tokenKey);
+    await prefs.remove(_googlePhotoKey);
   }
 
   static Future<bool> isLoggedIn() async {

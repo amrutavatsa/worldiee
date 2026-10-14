@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../services/api_service.dart';
 import '../theme/world_companion_colors.dart';
@@ -76,25 +77,84 @@ class _TripsScreenState extends State<TripsScreen> {
       setState(() => _isLoadingPlaces = true);
     }
 
+    List<Map<String, dynamic>> places = [];
+    String? notice;
+
     try {
-      final response = await ApiService.getPois();
-      final places = _extractPlaces(response);
+      final serviceEnabled =
+          await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled.');
+      }
 
-      if (!mounted) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
 
-      setState(() {
-        _places = places;
-        _isLoadingPlaces = false;
-      });
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission is unavailable.');
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      ).timeout(const Duration(seconds: 15));
+
+      final nearby = await ApiService.getNearbyPlaces(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        radiusKm: 10.0,
+      );
+
+      places = nearby.map((item) {
+        final place = Map<String, dynamic>.from(item as Map);
+        final providerId =
+            (place['provider_id'] ?? place['id'] ?? '')
+                .toString()
+                .trim();
+        final name = (place['name'] ?? '').toString().trim();
+        final latitude = place['latitude'];
+        final longitude = place['longitude'];
+        final stableKey = providerId.isNotEmpty
+            ? providerId
+            : '${name}_${latitude}_$longitude';
+
+        place['provider_id'] = providerId;
+        place['id'] = 'external:$stableKey';
+        place['is_external'] = true;
+        return place;
+      }).where((place) {
+        return (place['name'] ?? '').toString().trim().isNotEmpty &&
+            place['latitude'] != null &&
+            place['longitude'] != null;
+      }).toList();
+
+      if (places.isEmpty) {
+        places = _extractPlaces(await ApiService.getPois());
+        notice = 'No nearby results; showing curated places.';
+      }
     } catch (_) {
-      if (!mounted) return;
+      try {
+        places = _extractPlaces(await ApiService.getPois());
+        notice = 'Nearby discovery unavailable; showing curated places.';
+      } catch (_) {
+        places = [];
+        notice = 'Could not load places.';
+      }
+    }
 
-      setState(() {
-        _places = [];
-        _isLoadingPlaces = false;
-      });
+    if (!mounted) return;
 
-      _showMessage('Could not load places.');
+    setState(() {
+      _places = places;
+      _isLoadingPlaces = false;
+    });
+
+    if (notice != null) {
+      _showMessage(notice);
     }
   }
 
@@ -190,16 +250,41 @@ class _TripsScreenState extends State<TripsScreen> {
 
     try {
       final stops = <Map<String, dynamic>>[];
+      final selectedIds = _selectedPlaceIds.toList();
 
-      for (int index = 0; index < _selectedPlaceIds.length; index++) {
-        final placeId = _selectedPlaceIds.elementAt(index);
-        final parsedPlaceId = int.tryParse(placeId);
+      for (int index = 0; index < selectedIds.length; index++) {
+        final selectedId = selectedIds[index];
+        final place = _places.firstWhere(
+          (candidate) => _getPlaceId(candidate) == selectedId,
+          orElse: () => <String, dynamic>{},
+        );
 
-        stops.add({
-          'place_id': parsedPlaceId ?? placeId,
+        if (place.isEmpty) {
+          throw Exception('A selected place is no longer available.');
+        }
+
+        final stop = <String, dynamic>{
           'day_number': 1,
           'order': index + 1,
-        });
+        };
+
+        if (place['is_external'] == true) {
+          stop.addAll({
+            'external_place_id':
+                (place['provider_id'] ?? '').toString(),
+            'external_place_name': _getPlaceName(place),
+            'external_place_category': _getPlaceCategory(place),
+            'external_place_latitude': place['latitude'],
+            'external_place_longitude': place['longitude'],
+            'external_place_address':
+                (place['address'] ?? '').toString(),
+          });
+        } else {
+          // Local Place IDs are strings, not integers.
+          stop['place_id'] = selectedId;
+        }
+
+        stops.add(stop);
       }
 
       final result = await ApiService.createItinerary(
@@ -223,7 +308,6 @@ class _TripsScreenState extends State<TripsScreen> {
     }
   }
 
-  // ---------------------------------------------------------------------------
   // VIEW ITINERARY
   // ---------------------------------------------------------------------------
 

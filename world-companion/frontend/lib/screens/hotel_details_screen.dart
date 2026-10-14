@@ -255,7 +255,10 @@ class HotelDetailsScreen extends StatelessWidget {
               child: _statCard(
                 icon: Icons.star_rounded,
                 label: 'Guest rating',
-                value: _rating().toStringAsFixed(1),
+                value: hotel['rating'] == null ||
+                        hotel['rating'].toString().trim().isEmpty
+                    ? 'Not available'
+                    : _rating().toStringAsFixed(1),
                 iconColor: WorldCompanionColors.warning,
                 compact: compact,
               ),
@@ -265,7 +268,9 @@ class HotelDetailsScreen extends StatelessWidget {
               child: _statCard(
                 icon: Icons.nightlight_round,
                 label: 'Price per night',
-                value: _formatPrice(_pricePerNight()),
+                value: hotel['price_per_night'] == null || _pricePerNight() <= 0
+                    ? 'Not available'
+                    : _formatPrice(_pricePerNight()),
                 iconColor: WorldCompanionColors.oceanBlue,
                 compact: compact,
               ),
@@ -453,7 +458,9 @@ class HotelDetailsScreen extends StatelessWidget {
           ),
           const SizedBox(height: WorldCompanionSpacing.sm),
           Text(
-            'Review your stay details and continue to booking.',
+            hotel['is_external'] == true
+                ? 'This nearby stay is listed by an external places provider. Confirm rates and availability directly with the property.'
+                : 'Review your stay details and continue to booking.',
             style: textTheme.bodyMedium?.copyWith(
               color: Colors.white.withOpacity(0.78),
             ),
@@ -462,16 +469,20 @@ class HotelDetailsScreen extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => BookingScreen(hotel: hotel),
-                  ),
-                );
-              },
+              onPressed: hotel['is_external'] == true
+                  ? null
+                  : () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => BookingScreen(hotel: hotel),
+                        ),
+                      );
+                    },
               icon: const Icon(Icons.arrow_forward_rounded),
-              label: const Text('Book this stay'),
+              label: Text(hotel['is_external'] == true
+                  ? 'External listing'
+                  : 'Book this stay'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: WorldCompanionColors.softWhite,
                 foregroundColor: WorldCompanionColors.deepOcean,
@@ -492,15 +503,16 @@ class HotelDetailsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: WorldCompanionSpacing.md),
-          Center(
-            child: Text(
-              'Booking is simulated in the current project backend.',
-              textAlign: TextAlign.center,
-              style: textTheme.bodySmall?.copyWith(
-                color: Colors.white.withOpacity(0.62),
+          if (hotel['is_external'] != true)
+            Center(
+              child: Text(
+                'Booking is simulated in the current project backend.',
+                textAlign: TextAlign.center,
+                style: textTheme.bodySmall?.copyWith(
+                  color: Colors.white.withOpacity(0.62),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

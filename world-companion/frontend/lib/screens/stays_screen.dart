@@ -1,5 +1,6 @@
-
+﻿
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../services/api_service.dart';
 import '../theme/world_companion_colors.dart';
@@ -36,24 +37,53 @@ class _StaysScreenState extends State<StaysScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> _loadHotels() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
     try {
-      final response = await ApiService.getHotels();
+      Position? position;
+
+      // Location is optional: hotel listings must still work without GPS.
+      try {
+        final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (serviceEnabled) {
+          var permission = await Geolocator.checkPermission();
+
+          if (permission == LocationPermission.denied) {
+            permission = await Geolocator.requestPermission();
+          }
+
+          if (permission != LocationPermission.denied &&
+              permission != LocationPermission.deniedForever) {
+            position = await Geolocator.getCurrentPosition(
+              locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+            ).timeout(const Duration(seconds: 10));
+          }
+        }
+      } catch (locationError) {
+        debugPrint('STAYS LOCATION UNAVAILABLE: $locationError');
+      }
+
+      final response = position == null
+          ? await ApiService.getHotels()
+          : await ApiService.getHotels(
+              latitude: position.latitude,
+              longitude: position.longitude,
+              radiusKm: 10,
+            );
+
       final hotels = _extractHotels(response);
 
       if (!mounted) return;
-
       setState(() {
         _hotels = hotels;
         _isLoading = false;
       });
     } catch (e) {
       debugPrint('STAYS LOAD ERROR: $e');
-
       if (!mounted) return;
 
       setState(() {
@@ -154,7 +184,7 @@ class _StaysScreenState extends State<StaysScreen> {
       return 'Price unavailable';
     }
 
-    return '₹${price.toStringAsFixed(0)} / night';
+    return 'â‚¹${price.toStringAsFixed(0)} / night';
   }
 
   void _selectCategory(int index) {
@@ -710,34 +740,35 @@ class _StaysScreenState extends State<StaysScreen> {
                     );
                   }).toList(),
                 ),
-              const Spacer(),
+              const SizedBox(height: WorldCompanionSpacing.md),
               const Divider(
                 height: WorldCompanionSpacing.lg,
                 color: WorldCompanionColors.border,
               ),
               Row(
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'PRICE PER NIGHT',
-                          style: WorldCompanionTypography
-                              .textTheme.labelSmall,
-                        ),
-                        const SizedBox(height: WorldCompanionSpacing.xxs),
-                        Text(
-                          _formatPrice(price),
-                          style: WorldCompanionTypography
-                              .textTheme.titleMedium
-                              ?.copyWith(
-                            color: WorldCompanionColors.oceanBlue,
+                  if (price != null)
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'PRICE PER NIGHT',
+                            style: WorldCompanionTypography
+                                .textTheme.labelSmall,
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: WorldCompanionSpacing.xxs),
+                          Text(
+                            _formatPrice(price),
+                            style: WorldCompanionTypography
+                                .textTheme.titleMedium
+                                ?.copyWith(
+                              color: WorldCompanionColors.oceanBlue,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                   Container(
                     width: 40,
                     height: 40,
@@ -778,7 +809,7 @@ class _StaysScreenState extends State<StaysScreen> {
           ),
           const SizedBox(height: WorldCompanionSpacing.md),
           Text(
-            'Finding available stays…',
+            'Finding available staysâ€¦',
             style: WorldCompanionTypography.textTheme.bodyMedium,
           ),
         ],
@@ -889,3 +920,4 @@ class _StaysScreenState extends State<StaysScreen> {
     );
   }
 }
+

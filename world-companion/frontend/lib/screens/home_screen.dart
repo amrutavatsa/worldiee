@@ -1,3 +1,4 @@
+﻿
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -5,8 +6,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../services/api_service.dart';
+import '../theme/world_companion_colors.dart';
 import 'companion_screen.dart';
-import 'explore_screens.dart';
 import 'nearby_screen.dart';
 import 'place_details_screen.dart';
 import 'profile_screen.dart';
@@ -26,6 +27,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   static const Duration _silenceDuration = Duration(seconds: 3);
 
+  // Used only when device location cannot be obtained.
+  static const double _fallbackLatitude = 12.9716;
+  static const double _fallbackLongitude = 77.5946;
+
   bool _speechAvailable = false;
   bool _isListening = false;
   bool _voiceSubmitting = false;
@@ -36,6 +41,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool _recommendationsLoading = true;
   List<Map<String, dynamic>> _recommendations = [];
+
+  // District-aware Featured Destinations.
+  List<Map<String, dynamic>> _featuredDestinations = [];
+  String? _featuredCity;
+  String? _featuredDistrict;
+
+  bool _featuredRequestInProgress = false;
+  String? _featuredRequestCoordinates;
 
   Timer? _speechSilenceTimer;
 
@@ -99,7 +112,13 @@ class _HomeScreenState extends State<HomeScreen> {
           });
 
           if (!listening) {
-            _cancelSilenceTimer();
+            if (_voiceSubmitting) {
+              _cancelSilenceTimer();
+            } else if (_controller.text.trim().isNotEmpty) {
+              _resetSilenceTimer();
+            } else {
+              _cancelSilenceTimer();
+            }
           }
         },
         onError: (_) {
@@ -119,7 +138,9 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _speechAvailable = available;
       });
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[Speech] Initialization failed: $error');
+
       if (!mounted) return;
 
       setState(() {
@@ -142,7 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleSpeechSilence() async {
-    if (!mounted || !_isListening || _voiceSubmitting) return;
+    if (!mounted || _voiceSubmitting) return;
 
     final text = _controller.text.trim();
     if (text.isEmpty) return;
@@ -177,7 +198,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (recognizedText.isNotEmpty) {
         _openCompanion(initialMessage: recognizedText);
       }
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[Speech] Could not finish voice input: $error');
+
       if (!mounted) return;
 
       setState(() {
@@ -263,7 +286,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
       _resetSilenceTimer();
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[Speech] Could not start listening: $error');
+
       if (!mounted) return;
 
       setState(() {
@@ -277,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // Dedicated Companion navigation
+  // Companion navigation
   // ---------------------------------------------------------------------------
 
   void _openCompanion({String? initialMessage}) {
@@ -307,7 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // Nearby places
+  // Nearby places and location
   // ---------------------------------------------------------------------------
 
   Future<void> _loadNearbyPlaces() async {
@@ -351,6 +376,20 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       );
 
+      debugPrint(
+        '[Home] GPS coordinates: '
+        '${position.latitude}, ${position.longitude}',
+      );
+
+      // Load featured destinations without blocking Nearby Places.
+      unawaited(
+        _loadFeaturedDestinationsForCoordinates(
+          position.latitude,
+          position.longitude,
+        ),
+      );
+
+      // Preserve the existing Nearby Places request.
       final result = await ApiService.getNearbyPlaces(
         latitude: position.latitude,
         longitude: position.longitude,
@@ -368,7 +407,20 @@ class _HomeScreenState extends State<HomeScreen> {
         _nearbyPlaces = parsedPlaces;
         _nearbyLoading = false;
       });
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint('[Home] GPS/Nearby request failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      // If GPS fails, still request Featured Destinations.
+      // Bengaluru is a fallback for the destination lookup only.
+      // It is not presented as the user's confirmed location.
+      unawaited(
+        _loadFeaturedDestinationsForCoordinates(
+          _fallbackLatitude,
+          _fallbackLongitude,
+        ),
+      );
+
       if (!mounted) return;
 
       final message = error.toString().toLowerCase();
@@ -383,6 +435,109 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? 'Location took too long to respond.'
                     : 'Nearby places could not be loaded right now.';
       });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // District-aware Featured Destinations
+  // ---------------------------------------------------------------------------
+
+  Future<void> _loadFeaturedDestinationsForCoordinates(
+    double latitude,
+    double longitude,
+  ) async {
+    final coordinatesKey =
+        '${latitude.toStringAsFixed(5)},${longitude.toStringAsFixed(5)}';
+
+    // Avoid duplicate requests for the same coordinates while one is active.
+    if (_featuredRequestInProgress) {
+      debugPrint(
+        '[Featured] Request skipped because another request is active. '
+        'Requested coordinates: $coordinatesKey',
+      );
+      return;
+    }
+
+    // Skip re-fetching the same coordinates after a successful result.
+    if (_featuredDestinations.isNotEmpty &&
+        _featuredRequestCoordinates == coordinatesKey) {
+      debugPrint(
+        '[Featured] Cached result already loaded for $coordinatesKey',
+      );
+      return;
+    }
+
+    _featuredRequestInProgress = true;
+    _featuredRequestCoordinates = coordinatesKey;
+
+    debugPrint(
+      '[Featured] Requesting destinations for '
+      'lat=$latitude, lon=$longitude',
+    );
+
+    try {
+      final response = await ApiService.getFeaturedDestinations(
+        latitude: latitude,
+        longitude: longitude,
+      );
+
+      debugPrint('[Featured] API response: $response');
+
+      if (!mounted) return;
+
+      final rawDestinations = response['destinations'];
+
+      final parsedDestinations = rawDestinations is List
+          ? rawDestinations
+              .whereType<Map>()
+              .map(
+                (item) => Map<String, dynamic>.from(item),
+              )
+              .where((item) {
+                final name = item['name']?.toString().trim() ?? '';
+                final image = item['image']?.toString().trim() ?? '';
+
+                return name.isNotEmpty && image.startsWith('http');
+              })
+              .toList()
+          : <Map<String, dynamic>>[];
+
+      final city = response['city']?.toString();
+      final district = response['district']?.toString();
+
+      debugPrint('[Featured] Success: ${response['success']}');
+      debugPrint('[Featured] City: $city');
+      debugPrint('[Featured] District: $district');
+      debugPrint(
+        '[Featured] Destination names: '
+        '${parsedDestinations.map((item) => item['name']).toList()}',
+      );
+
+      if (parsedDestinations.isEmpty) {
+        debugPrint(
+          '[Featured] No valid destinations returned. '
+          'Keeping the existing fallback cards.',
+        );
+        return;
+      }
+
+      setState(() {
+        _featuredDestinations = parsedDestinations;
+        _featuredCity = city;
+        _featuredDistrict = district;
+      });
+    } catch (error, stackTrace) {
+      debugPrint('[Featured] API request FAILED: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      // Keep fallback cards visible if the optional API fails.
+    } finally {
+      _featuredRequestInProgress = false;
+
+      // Allow another attempt if no destinations were loaded.
+      if (_featuredDestinations.isEmpty) {
+        _featuredRequestCoordinates = null;
+      }
     }
   }
 
@@ -409,7 +564,9 @@ class _HomeScreenState extends State<HomeScreen> {
             .toList();
         _recommendationsLoading = false;
       });
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[Recommendations] Request failed: $error');
+
       if (!mounted) return;
 
       setState(() {
@@ -436,15 +593,6 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute<void>(
         builder: (_) => const NearbyScreen(),
-      ),
-    );
-  }
-
-  void _openExplore() {
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => ExploreScreen(),
       ),
     );
   }
@@ -490,7 +638,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return raw
         .split(' ')
         .where((part) => part.isNotEmpty)
-        .map((part) => part[0].toUpperCase() + part.substring(1))
+        .map(
+          (part) => part[0].toUpperCase() + part.substring(1),
+        )
         .join(' ');
   }
 
@@ -498,6 +648,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (value == null) return '';
 
     final distance = double.tryParse(value.toString());
+
     if (distance == null || !distance.isFinite || distance < 0) {
       return '';
     }
@@ -622,6 +773,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final locationName = _featuredCity?.trim().isNotEmpty == true
+        ? _featuredCity!.trim()
+        : _featuredDistrict?.trim().isNotEmpty == true
+            ? _featuredDistrict!.trim()
+            : 'your area';
+
+    final featuredSubtitle = _featuredDestinations.isNotEmpty
+        ? 'Popular places around $locationName'
+        : 'Ideas for your next escape';
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
@@ -642,12 +803,12 @@ class _HomeScreenState extends State<HomeScreen> {
               SliverToBoxAdapter(
                 child: _buildSectionHeading(
                   title: 'Featured destinations',
-                  subtitle: 'Ideas for your next escape',
-                  actionLabel: 'Explore all',
-                  onAction: _openExplore,
+                  subtitle: featuredSubtitle,
                 ),
               ),
-              SliverToBoxAdapter(child: _buildFeaturedDestinations()),
+              SliverToBoxAdapter(
+                child: _buildFeaturedDestinations(),
+              ),
               SliverToBoxAdapter(
                 child: _buildSectionHeading(
                   title: 'Discover places near you',
@@ -656,17 +817,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   onAction: _openNearby,
                 ),
               ),
-              SliverToBoxAdapter(child: _buildNearbySection()),
               SliverToBoxAdapter(
-                child: _buildSectionHeading(
-                  title: 'Recommended for you',
-                  subtitle: 'Suggestions from WorldCompanion',
-                  actionLabel: 'Explore',
-                  onAction: _openExplore,
-                ),
+                child: _buildNearbySection(),
               ),
-              SliverToBoxAdapter(child: _buildRecommendationsSection()),
-              SliverToBoxAdapter(child: _buildCompanionSection()),
+              SliverToBoxAdapter(
+                child: _buildCompanionSection(),
+              ),
               const SliverToBoxAdapter(
                 child: SizedBox(height: 28),
               ),
@@ -684,31 +840,16 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
       child: Row(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: colors.primary,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.explore_rounded,
-              color: Colors.white,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 11),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'WORLD COMPANION',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.primary,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.15,
-                      ),
+                Image.asset(
+                  'assets/images/world_companion_logo.png',
+                  width: 220,
+                  height: 42,
+                  fit: BoxFit.contain,
+                  alignment: Alignment.centerLeft,
                 ),
                 Text(
                   'Your journey, thoughtfully planned.',
@@ -803,9 +944,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: colors.primary,
                 ),
                 suffixIcon: IconButton(
-                  tooltip: _isListening
-                      ? 'Stop voice input'
-                      : 'Use voice input',
+                  tooltip:
+                      _isListening ? 'Stop voice input' : 'Use voice input',
                   onPressed: _voiceSubmitting ? null : _toggleListening,
                   icon: Icon(
                     _isListening
@@ -869,14 +1009,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildQuickActions() {
-    final colors = Theme.of(context).colorScheme;
-
     final actions = [
-      (
-        title: 'Explore',
-        icon: Icons.travel_explore_rounded,
-        onTap: _openExplore,
-      ),
       (
         title: 'Plan a trip',
         icon: Icons.route_rounded,
@@ -914,12 +1047,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           width: 54,
                           height: 54,
                           decoration: BoxDecoration(
-                            color: colors.primaryContainer,
+                            color: WorldCompanionColors.infoSurface,
                             borderRadius: BorderRadius.circular(17),
                           ),
                           child: Icon(
                             action.icon,
-                            color: colors.primary,
+                            color: WorldCompanionColors.deepOcean,
                             size: 25,
                           ),
                         ),
@@ -948,8 +1081,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildSectionHeading({
     required String title,
     required String subtitle,
-    required String actionLabel,
-    required VoidCallback onAction,
+    String? actionLabel,
+    VoidCallback? onAction,
   }) {
     final colors = Theme.of(context).colorScheme;
 
@@ -979,35 +1112,53 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          TextButton(
-            onPressed: onAction,
-            child: Text(actionLabel),
-          ),
+          if (actionLabel != null && onAction != null)
+            TextButton(
+              onPressed: onAction,
+              child: Text(actionLabel),
+            ),
         ],
       ),
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Featured destinations
+  // ---------------------------------------------------------------------------
+
   Widget _buildFeaturedDestinations() {
+    final List<Map<String, dynamic>> destinations =
+        _featuredDestinations.isNotEmpty
+            ? _featuredDestinations
+            : _destinations
+                .map(
+                  (destination) => Map<String, dynamic>.from(destination),
+                )
+                .toList();
+
     return SizedBox(
       height: 224,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         scrollDirection: Axis.horizontal,
-        itemCount: _destinations.length,
+        itemCount: destinations.length,
         separatorBuilder: (_, __) => const SizedBox(width: 14),
         itemBuilder: (context, index) {
-          final destination = _destinations[index];
+          final destination = destinations[index];
+
+          final name = destination['name']?.toString() ?? 'Destination';
+          final subtitle =
+              destination['subtitle']?.toString() ?? 'Explore nearby';
+          final imageUrl = destination['image']?.toString() ?? '';
 
           return SizedBox(
             width: 255,
             child: _buildPhotoCard(
-              title: destination['name']!,
-              subtitle: destination['subtitle']!,
-              imageUrl: destination['image']!,
+              title: name,
+              subtitle: subtitle,
+              imageUrl: imageUrl,
               onTap: () => _openCompanion(
-                initialMessage:
-                    'Help me plan a trip to ${destination['name']}',
+                initialMessage: 'Help me plan a trip to $name',
               ),
             ),
           );
@@ -1024,6 +1175,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }) {
     final colors = Theme.of(context).colorScheme;
 
+    final fallback = _categoryPlaceholder(
+      backgroundColor: colors.primaryContainer,
+      iconColor: colors.primary,
+      icon: Icons.landscape_rounded,
+      iconSize: 56,
+    );
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(21),
       child: Material(
@@ -1033,16 +1191,13 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              _networkImage(
-                imageUrl: imageUrl,
-                fit: BoxFit.cover,
-                fallback: _categoryPlaceholder(
-                  backgroundColor: colors.primaryContainer,
-                  iconColor: colors.primary,
-                  icon: Icons.landscape_rounded,
-                  iconSize: 56,
-                ),
-              ),
+              imageUrl.startsWith('http')
+                  ? _networkImage(
+                      imageUrl: imageUrl,
+                      fit: BoxFit.cover,
+                      fallback: fallback,
+                    )
+                  : fallback,
               DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -1088,6 +1243,10 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Nearby places UI
+  // ---------------------------------------------------------------------------
 
   Widget _buildNearbySection() {
     final colors = Theme.of(context).colorScheme;
@@ -1163,7 +1322,8 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(width: 12),
               const Expanded(
                 child: Text(
-                  'No nearby places were returned. Try refreshing or explore the full map.',
+                  'No nearby places were returned. '
+                  'Try refreshing or explore the full map.',
                 ),
               ),
               IconButton(
@@ -1262,6 +1422,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Recommendations UI — kept available for existing use
+  // ---------------------------------------------------------------------------
+
   Widget _buildRecommendationsSection() {
     final colors = Theme.of(context).colorScheme;
 
@@ -1291,7 +1455,8 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(width: 12),
               const Expanded(
                 child: Text(
-                  'Explore places and save your travel preferences to get more relevant suggestions.',
+                  'Explore places and save your travel preferences '
+                  'to get more relevant suggestions.',
                 ),
               ),
             ],
@@ -1382,6 +1547,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }).toList(),
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Companion section
+  // ---------------------------------------------------------------------------
 
   Widget _buildCompanionSection() {
     final colors = Theme.of(context).colorScheme;

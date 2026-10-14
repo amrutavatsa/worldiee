@@ -9,6 +9,7 @@ import '../theme/world_companion_radius.dart';
 import '../theme/world_companion_spacing.dart';
 import '../theme/world_companion_typography.dart';
 import 'app_shell.dart';
+import 'legal_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -25,6 +26,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isLogin = true;
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _hasAcceptedPolicies = false;
 
   String? _errorMessage;
 
@@ -36,6 +38,14 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _submit() async {
+    if (!_hasAcceptedPolicies) {
+      setState(() {
+        _errorMessage =
+            'Please accept the Terms & Conditions and acknowledge the Privacy Policy to continue.';
+      });
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -189,23 +199,12 @@ class _AuthScreenState extends State<AuthScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              const _BrandMark(
-                size: 46,
-                background: Color(0x22FFFFFF),
-                foreground: Colors.white,
-              ),
-              const SizedBox(width: WorldCompanionSpacing.sm),
-              Text(
-                'WORLD COMPANION',
-                style: WorldCompanionTypography.brand.copyWith(
-                  color: Colors.white,
-                  fontSize: 12,
-                  letterSpacing: 1.8,
-                ),
-              ),
-            ],
+          Image.asset(
+            'assets/images/world_companion_logo_reverse.png',
+            width: 230,
+            height: 58,
+            fit: BoxFit.contain,
+            alignment: Alignment.centerLeft,
           ),
           const SizedBox(height: WorldCompanionSpacing.xl),
           Column(
@@ -316,20 +315,12 @@ class _AuthScreenState extends State<AuthScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (!isWide) ...[
-              const Center(
-                child: _BrandMark(
-                  size: 60,
-                  background: WorldCompanionColors.deepOcean,
-                  foreground: Colors.white,
-                ),
-              ),
-              const SizedBox(height: WorldCompanionSpacing.md),
-              Text(
-                'WORLD COMPANION',
-                textAlign: TextAlign.center,
-                style: WorldCompanionTypography.brand.copyWith(
-                  fontSize: 12,
-                  letterSpacing: 1.6,
+              Center(
+                child: Image.asset(
+                  'assets/images/world_companion_logo.png',
+                  width: 230,
+                  height: 64,
+                  fit: BoxFit.contain,
                 ),
               ),
               const SizedBox(height: WorldCompanionSpacing.xl),
@@ -431,6 +422,55 @@ class _AuthScreenState extends State<AuthScreen> {
                 style: theme.textTheme.bodySmall,
               ),
             ],
+            CheckboxListTile(
+              value: _hasAcceptedPolicies,
+              onChanged: _isLoading
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _hasAcceptedPolicies = value ?? false;
+                        _errorMessage = null;
+                      });
+                    },
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                'I agree to the Terms & Conditions and acknowledge the Privacy Policy.',
+                style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: WorldCompanionSpacing.xl),
+              child: Wrap(
+                spacing: WorldCompanionSpacing.md,
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const LegalScreen(
+                            document: LegalDocument.terms,
+                          ),
+                        ),
+                      );
+                    },
+                    child: const Text('Read Terms & Conditions'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const LegalScreen(
+                            document: LegalDocument.privacy,
+                          ),
+                        ),
+                      );
+                    },
+                    child: const Text('Read Privacy Policy'),
+                  ),
+                ],
+              ),
+            ),
             if (_errorMessage != null) ...[
               const SizedBox(height: WorldCompanionSpacing.md),
               _ErrorBanner(message: _errorMessage!),
@@ -493,10 +533,24 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
             const SizedBox(height: WorldCompanionSpacing.lg),
             Center(
-              child: GoogleSignInButton(
-                onSuccess: _handleGoogleSuccess,
-                onError: _handleGoogleError,
-              ),
+              child: _hasAcceptedPolicies
+                  ? GoogleSignInButton(
+                      onSuccess: _handleGoogleSuccess,
+                      onError: _handleGoogleError,
+                    )
+                  : OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _errorMessage =
+                              'Accept the Terms & Conditions and acknowledge the Privacy Policy before continuing with Google.';
+                        });
+                      },
+                      icon: const Icon(Icons.g_mobiledata, size: 28),
+                      label: const Text('Continue with Google'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(240, 52),
+                      ),
+                    ),
             ),
             const SizedBox(height: WorldCompanionSpacing.md),
             Center(
@@ -578,37 +632,6 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _BrandMark extends StatelessWidget {
-  final double size;
-  final Color background;
-  final Color foreground;
-
-  const _BrandMark({
-    required this.size,
-    required this.background,
-    required this.foreground,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(
-          WorldCompanionRadius.large,
-        ),
-      ),
-      child: Icon(
-        Icons.explore_rounded,
-        color: foreground,
-        size: size * 0.52,
       ),
     );
   }
@@ -779,3 +802,6 @@ class _ModeButton extends StatelessWidget {
     );
   }
 }
+
+
+

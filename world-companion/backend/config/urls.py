@@ -1,3 +1,4 @@
+
 from django.contrib import admin
 from django.urls import path
 
@@ -10,6 +11,7 @@ from api.auth_views import (
     google_login_view,
     profile_view,
 )
+from api.featured_destinations import featured_destinations_view
 
 
 urlpatterns = [
@@ -30,15 +32,19 @@ urlpatterns = [
     path("api/transcribe/", views.transcribe_view),
     path("api/pois/", views.pois_view),
 
-    # Phase 2 — AI place/food info & discovery
+    # Phase 2 — real-world places
     path("api/places/nearby/", v2.nearby_places_view),
+    path(
+        "api/featured-destinations/",
+        featured_destinations_view,
+    ),
     path("api/places/<str:place_id>/info/", v2.place_info_view),
     path(
         "api/places/<str:place_id>/ai/",
         v2.place_ai_intelligence_view,
     ),
 
-    # Phase 2 — Real-world road routing
+    # Phase 2 — real-world road routing
     path(
         "api/routes/real-world/",
         v2.real_world_route_view,
@@ -65,14 +71,8 @@ urlpatterns = [
         "api/emergency-contacts/list/",
         v2.emergency_contact_list_view,
     ),
-    path(
-        "api/sos/active/", 
-        v2.sos_active_view
-    ),
-    path(
-        "api/sos/trigger/", 
-        v2.sos_trigger_view
-    ),
+    path("api/sos/active/", v2.sos_active_view),
+    path("api/sos/trigger/", v2.sos_trigger_view),
     path(
         "api/sos/<uuid:event_id>/activate/",
         v2.sos_activate_view,
@@ -90,7 +90,7 @@ urlpatterns = [
         v2.itinerary_detail_view,
     ),
 
-    # Phase 2 — preferences & rule-based recommendations
+    # Phase 2 — preferences & recommendations
     path("api/preferences/", v2.preferences_save_view),
     path("api/recommendations/", v2.recommendations_view),
 ]

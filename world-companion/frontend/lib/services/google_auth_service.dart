@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:google_identity_services_web/id.dart' as gis;
 import 'package:web/web.dart' as web;
@@ -79,6 +80,34 @@ class GoogleAuthService {
         throw Exception(
           'Google ID token was not received.',
         );
+      }
+
+      try {
+
+        final parts = idToken.split('.');
+
+        if (parts.length == 3) {
+
+          final claims = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
+
+          if (claims is Map) {
+
+            final picture = claims['picture']?.toString();
+
+            if (picture != null && picture.startsWith('https://')) {
+
+              await AuthService.saveGooglePhotoUrl(picture);
+
+            }
+
+          }
+
+        }
+
+      } catch (_) {
+
+        // The profile photo is optional; sign-in must still work without it.
+
       }
 
       final result = await ApiService.googleLogin(idToken);

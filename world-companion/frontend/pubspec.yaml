@@ -1,5 +1,5 @@
-name: world_companion
-description: World Companion — Phase 1 (Voice Navigation + Route Optimization)
+﻿name: world_companion
+description: World Companion â€” Phase 1 (Voice Navigation + Route Optimization)
 publish_to: 'none'
 version: 0.1.0
 
@@ -35,3 +35,13 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/world_companion_logo.png
+    - assets/images/world_companion_mark.png
+    - assets/images/world_companion_app_icon.png
+    - assets/images/world_companion_logo_reverse.png
+    - assets/images/world_companion_monochrome.png
+
+
+dependency_overrides:
+  geolocator_android: 4.6.1

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../services/api_service.dart';
@@ -105,7 +105,7 @@ class _CompanionScreenState extends State<CompanionScreen> {
         _messages.add(
           const _ChatMessage(
             text:
-                'I couldn’t connect right now. Please check your connection and try again.',
+                'I couldnâ€™t connect right now. Please check your connection and try again.',
             isUser: false,
             isError: true,
           ),
@@ -150,19 +150,18 @@ class _CompanionScreenState extends State<CompanionScreen> {
         titleSpacing: 0,
         title: Row(
           children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: WorldCompanionColors.deepOcean,
-                borderRadius: BorderRadius.circular(
-                  WorldCompanionRadius.medium,
+            Padding(
+              padding: const EdgeInsets.all(4),
+              child: Image.asset(
+                'assets/images/world_companion_mark.png',
+                width: 42,
+                height: 42,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const Icon(
+                  Icons.explore_rounded,
+                  color: WorldCompanionColors.deepOcean,
+                  size: 24,
                 ),
-              ),
-              child: const Icon(
-                Icons.explore_rounded,
-                color: WorldCompanionColors.surface,
-                size: 24,
               ),
             ),
             const SizedBox(width: WorldCompanionSpacing.sm),
@@ -798,3 +797,4 @@ class _ChatMessage {
     this.isError = false,
   });
 }
+

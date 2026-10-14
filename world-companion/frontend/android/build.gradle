@@ -6,11 +6,20 @@ allprojects {
 }
 
 rootProject.buildDir = "../build"
+
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
+
 subprojects {
     project.evaluationDependsOn(":app")
+
+    if (project.name != "app") {
+        project.extensions.extraProperties.set(
+            "flutter",
+            rootProject.project(":app").extensions.getByName("flutter")
+        )
+    }
 }
 
 tasks.register("clean", Delete) {

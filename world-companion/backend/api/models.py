@@ -186,7 +186,18 @@ class ItineraryStop(models.Model):
     itinerary = models.ForeignKey(Itinerary, on_delete=models.CASCADE, related_name="stops")
     day_number = models.PositiveSmallIntegerField(default=1)
     order = models.PositiveSmallIntegerField(default=0)
-    place = models.ForeignKey(Place, on_delete=models.CASCADE)
+    place = models.ForeignKey(
+        Place,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+    external_place_id = models.CharField(max_length=255, blank=True, default="")
+    external_place_name = models.CharField(max_length=200, blank=True, default="")
+    external_place_category = models.CharField(max_length=64, blank=True, default="")
+    external_place_latitude = models.FloatField(null=True, blank=True)
+    external_place_longitude = models.FloatField(null=True, blank=True)
+    external_place_address = models.CharField(max_length=500, blank=True, default="")
     scheduled_time = models.CharField(max_length=20, blank=True, default="")  # e.g. "09:00 AM"
     notes = models.CharField(max_length=300, blank=True, default="")
 

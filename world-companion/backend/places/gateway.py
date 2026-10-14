@@ -9,14 +9,7 @@ def search_nearby(
     radius_km=10.0,
     category=None,
 ):
-    """
-    Provider-independent entry point for nearby places.
-
-    WorldCompanion uses Geoapify as the current provider,
-    but the rest of the application does not depend on
-    Geoapify's response format.
-    """
-
+    """Provider-independent nearby places search."""
     places = geoapify_search_nearby(
         latitude=latitude,
         longitude=longitude,
@@ -25,37 +18,51 @@ def search_nearby(
     )
 
     normalized = []
+    seen = set()
 
-    for place in places:
+    for place in places or []:
+        if not isinstance(place, dict):
+            continue
+
         normalized_place = _normalize_place(place)
-
         if normalized_place is None:
             continue
 
+        provider_id = str(normalized_place.get("id") or "").strip()
+        if provider_id:
+            key = ("id", provider_id)
+        else:
+            key = (
+                "location",
+                normalized_place["name"].casefold(),
+                normalized_place.get("latitude"),
+                normalized_place.get("longitude"),
+            )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
         normalized.append(normalized_place)
 
     return normalized
 
 
 def _normalize_place(place):
-    """
-    Convert one provider result into the
-    WorldCompanion place format.
-    """
-
-    name = str(place.get("name", "")).strip()
-
+    """Convert a provider result into WorldCompanion's place format."""
+    name = str(place.get("name") or "").strip()
     if not name:
         return None
+
+    tags = place.get("tags") or {}
+    if not isinstance(tags, dict):
+        tags = {}
 
     category = _normalize_category(
         category=place.get("category"),
         place_type=place.get("type"),
-        tags=place.get("tags", {}),
+        tags=tags,
     )
-
-    if category is None:
-        return None
 
     if _is_obvious_noise(
         name=name,
@@ -64,332 +71,266 @@ def _normalize_place(place):
     ):
         return None
 
-    subcategory = _normalize_subcategory(
-        category=category,
-        place_type=place.get("type"),
-        tags=place.get("tags", {}),
-    )
-
     return {
-        "id": place.get("provider_id"),
+        "id": place.get("provider_id") or place.get("id"),
         "name": name,
         "category": category,
-        "subcategory": subcategory,
+        "subcategory": _normalize_subcategory(
+            category=category,
+            place_type=place.get("type"),
+            tags=tags,
+        ),
         "latitude": place.get("latitude"),
         "longitude": place.get("longitude"),
-        "address": place.get("address", ""),
-        "type": place.get("type", "place"),
-        "tags": place.get("tags", {}),
+        "address": place.get("address") or "",
+        "type": place.get("type") or "place",
+        "tags": tags,
         "distance_km": place.get("distance_km", 0.0),
     }
 
 
-def _normalize_category(
-    category,
-    place_type,
-    tags,
-):
-    """
-    Convert provider-specific categories into
-    WorldCompanion's five travel categories.
+def _normalize_category(category, place_type, tags):
+    """Map Geoapify categories to WorldCompanion discovery categories."""
+    category_text = str(category or "").casefold().strip()
+    type_text = str(place_type or "").casefold().strip()
 
-    Utilities remain supported but are kept separate
-    from the primary travel categories.
-    """
-
-    category_text = str(category or "").lower().strip()
-    type_text = str(place_type or "").lower().strip()
-
-    geoapify_categories = tags.get(
-        "geoapify_categories",
-        [],
-    )
-
-    if not isinstance(geoapify_categories, list):
-        geoapify_categories = []
-
-    geo_text = " ".join(
-        str(value).lower()
-        for value in geoapify_categories
-    )
+    geo_categories = tags.get("geoapify_categories", [])
+    if not isinstance(geo_categories, list):
+        geo_categories = []
 
     combined = " ".join(
-        [
-            category_text,
-            type_text,
-            geo_text,
-        ]
+        [category_text, type_text]
+        + [str(value).casefold() for value in geo_categories]
     )
 
-    # -------------------------
-    # FOOD & DINING
-    # -------------------------
-
-    if (
-        "catering.restaurant" in combined
-        or "catering.cafe" in combined
-        or "catering.bar" in combined
-        or "catering.pub" in combined
-        or "catering.biergarten" in combined
-        or "catering.fast_food" in combined
-        or "catering.food_court" in combined
-        or "catering" == category_text
-    ):
+    # Food and dining.
+    if any(term in combined for term in (
+        "catering",
+        "restaurant",
+        "fast_food",
+        "food_court",
+        "food_stand",
+        "ice_cream",
+        "biergarten",
+        "cafe",
+        "pub",
+    )):
         return "food"
 
-    # -------------------------
-    # STAYS
-    # -------------------------
-
-    if (
-        "accommodation" in combined
-        or "accommodation.hotel" in combined
-        or "accommodation.hostel" in combined
-        or "accommodation.guest_house" in combined
-    ):
+    # Accommodation.
+    if any(term in combined for term in (
+        "accommodation",
+        "hotel",
+        "hostel",
+        "motel",
+        "guest_house",
+        "guesthouse",
+        "resort",
+    )):
         return "stays"
 
-    # -------------------------
-    # EXPLORE
-    # -------------------------
-
-    if (
-        "tourism" in combined
-        or "entertainment.museum" in combined
-        or "entertainment.culture" in combined
-        or "entertainment.aquarium" in combined
-        or "entertainment.zoo" in combined
-        or "entertainment.theme_park" in combined
-    ):
-        return "explore"
-
-    # -------------------------
-    # SHOPPING
-    # -------------------------
-
-    if (
-        "commercial.shopping_mall" in combined
-        or "commercial.marketplace" in combined
-        or "commercial.department_store" in combined
-        or "commercial" == category_text
-        or "shopping" in combined
-    ):
+    # Shopping and retail, including everyday shopping.
+    if any(term in combined for term in (
+        "commercial",
+        "shopping",
+        "supermarket",
+        "convenience",
+        "department_store",
+        "shopping_mall",
+        "marketplace",
+        "clothing",
+        "books",
+        "electronics",
+        "gift",
+        "florist",
+        "hardware",
+    )):
         return "shopping"
 
-    # -------------------------
-    # LEISURE
-    # -------------------------
-
-    if (
-        "leisure" in combined
-        or "entertainment" in combined
-    ):
+    # Parks, gardens, playgrounds, sports and recreation.
+    if any(term in combined for term in (
+        "leisure",
+        "sport",
+        "park",
+        "garden",
+        "playground",
+        "sports_centre",
+        "sports_centre",
+        "stadium",
+        "fitness",
+        "recreation",
+    )):
         return "leisure"
 
-    # -------------------------
-    # UTILITIES
-    # -------------------------
+    # Attractions and places to explore.
+    if any(term in combined for term in (
+        "tourism",
+        "entertainment",
+        "museum",
+        "gallery",
+        "aquarium",
+        "zoo",
+        "theme_park",
+        "viewpoint",
+        "attraction",
+        "historic",
+        "heritage",
+        "monument",
+        "castle",
+    )):
+        return "explore"
 
+    # Keep useful service categories separate from travel discovery.
     if "healthcare" in combined:
         return "healthcare"
 
     if "pharmacy" in combined:
         return "pharmacy"
 
-    if (
-        "service.financial" in combined
-        or "financial" in combined
-        or "bank" == category_text
-    ):
+    if any(term in combined for term in (
+        "service.financial",
+        "financial",
+        "bank",
+    )):
         return "bank"
 
-    if (
-        "vehicle.fuel" in combined
-        or "service.vehicle.fuel" in combined
-        or "fuel" == category_text
-    ):
+    if any(term in combined for term in (
+        "vehicle.fuel",
+        "service.vehicle.fuel",
+        "fuel",
+        "petrol",
+    )):
         return "fuel"
 
-    if "education" in combined:
+    if "education" in combined or "school" in combined or "university" in combined:
         return "education"
 
-    if (
-        "religion" in combined
-        or "place_of_worship" in combined
-    ):
+    if any(term in combined for term in (
+        "religion",
+        "place_of_worship",
+        "church",
+        "temple",
+        "mosque",
+    )):
         return "religious"
 
-    if (
-        "public_transport" in combined
-        or "transport" in combined
-    ):
+    if "public_transport" in combined or "transport" in combined:
         return "transport"
 
-    # Unknown provider result.
-    return None
+    # Do not silently drop new provider categories.
+    return "explore"
 
 
-def _normalize_subcategory(
-    category,
-    place_type,
-    tags,
-):
-    """
-    Produce a useful travel-facing subcategory.
-    """
+def _normalize_subcategory(category, place_type, tags):
+    """Produce a more specific label for display and icons."""
+    type_text = str(place_type or "").casefold()
 
-    type_text = str(place_type or "").lower()
+    geo_categories = tags.get("geoapify_categories", [])
+    if not isinstance(geo_categories, list):
+        geo_categories = []
 
-    geoapify_categories = tags.get(
-        "geoapify_categories",
-        [],
+    combined = " ".join(
+        [type_text] + [str(value).casefold() for value in geo_categories]
     )
-
-    if not isinstance(geoapify_categories, list):
-        geoapify_categories = []
-
-    geo_text = " ".join(
-        str(value).lower()
-        for value in geoapify_categories
-    )
-
-    combined = f"{type_text} {geo_text}"
 
     if category == "food":
-        if "restaurant" in combined:
-            return "restaurant"
-
-        if "cafe" in combined:
-            return "cafe"
-
-        if "bar" in combined:
-            return "bar"
-
-        if "pub" in combined:
-            return "pub"
-
-        if "biergarten" in combined:
-            return "biergarten"
-
-        if "fast_food" in combined:
-            return "fast_food"
-
-        if "food_court" in combined:
-            return "food_court"
-
+        for term, label in (
+            ("restaurant", "restaurant"),
+            ("fast_food", "fast_food"),
+            ("food_court", "food_court"),
+            ("ice_cream", "ice_cream"),
+            ("food_stand", "food_stand"),
+            ("biergarten", "biergarten"),
+            ("cafe", "cafe"),
+            ("pub", "pub"),
+            ("bar", "bar"),
+        ):
+            if term in combined:
+                return label
         return "food"
 
     if category == "stays":
-        if "hotel" in combined:
-            return "hotel"
-
-        if "hostel" in combined:
-            return "hostel"
-
-        if "guest_house" in combined:
-            return "guest_house"
-
-        if "resort" in combined:
-            return "resort"
-
+        for term in (
+            "hotel",
+            "hostel",
+            "guest_house",
+            "guesthouse",
+            "motel",
+            "resort",
+            "camp_site",
+        ):
+            if term in combined:
+                return term
         return "accommodation"
 
-    if category == "explore":
-        if "museum" in combined:
-            return "museum"
-
-        if "zoo" in combined:
-            return "zoo"
-
-        if "aquarium" in combined:
-            return "aquarium"
-
-        if "theme_park" in combined:
-            return "theme_park"
-
-        if "viewpoint" in combined:
-            return "viewpoint"
-
-        if "attraction" in combined:
-            return "attraction"
-
-        if "tourism" in combined:
-            return "attraction"
-
-        return "explore"
-
     if category == "shopping":
-        if "shopping_mall" in combined:
-            return "mall"
-
-        if "marketplace" in combined:
-            return "market"
-
-        if "department_store" in combined:
-            return "department_store"
-
+        for term, label in (
+            ("shopping_mall", "mall"),
+            ("marketplace", "market"),
+            ("department_store", "department_store"),
+            ("supermarket", "supermarket"),
+            ("convenience", "convenience_store"),
+            ("clothing", "clothing"),
+            ("books", "bookstore"),
+            ("electronics", "electronics"),
+            ("florist", "florist"),
+            ("hardware", "hardware"),
+        ):
+            if term in combined:
+                return label
         return "shopping"
 
     if category == "leisure":
-        if "park" in combined:
-            return "park"
-
-        if "garden" in combined:
-            return "garden"
-
-        if "cinema" in combined:
-            return "cinema"
-
-        if "playground" in combined:
-            return "playground"
-
+        for term in (
+            "playground",
+            "sports_centre",
+            "park",
+            "garden",
+            "pitch",
+            "stadium",
+            "fitness",
+            "recreation",
+        ):
+            if term in combined:
+                return term
         return "leisure"
+
+    if category == "explore":
+        for term in (
+            "museum",
+            "gallery",
+            "aquarium",
+            "zoo",
+            "theme_park",
+            "viewpoint",
+            "attraction",
+            "historic",
+            "heritage",
+            "monument",
+            "tourism.sights",
+        ):
+            if term in combined:
+                return term.replace("tourism.", "")
+        return "attraction"
 
     return category
 
 
-def _is_obvious_noise(
-    name,
-    category,
-    place_type,
-):
-    """
-    Remove only high-confidence provider mistakes.
+def _is_obvious_noise(name, category, place_type):
+    """Reject only high-confidence provider mistakes."""
+    normalized_name = " ".join(str(name).casefold().split())
+    normalized_type = str(place_type or "").casefold()
 
-    We intentionally DO NOT reject names merely because
-    they contain words such as Road, Nagar, Market, etc.
-    """
+    if category == "stays" and normalized_name in {"nh69", "nh 69"}:
+        return True
 
-    normalized_name = " ".join(
-        name.lower().split()
-    )
-
-    normalized_type = str(
-        place_type or ""
-    ).lower()
-
-    # Provider occasionally returns a road/highway as
-    # accommodation or catering.
-    if category == "stays":
-        if normalized_name in {
-            "nh69",
-            "nh 69",
+    if category == "leisure":
+        if normalized_type == "leisure.park" and normalized_name in {
+            "shivamogga - 577200",
+            "shivamogga 577200",
         }:
             return True
 
-    # Provider occasionally returns a locality/postal
-    # area as a park.
-    if category == "leisure":
-        if normalized_type == "leisure.park":
-            if normalized_name in {
-                "shivamogga - 577200",
-                "shivamogga 577200",
-            }:
-                return True
-
-    # A road should not become a leisure destination merely
-    # because the provider attached leisure.playground to it.
-    if category == "leisure":
         if normalized_type == "leisure.playground":
             if (
                 " road" in f" {normalized_name}"
